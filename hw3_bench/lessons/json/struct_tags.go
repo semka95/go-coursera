@@ -16,7 +16,7 @@ func main() {
 	u := &User{
 		ID:       42,
 		Username: "rvasily",
-		Address:  "test",
+		Address:  "",
 		Comnpany: "Mail.Ru Group",
 	}
 	result, _ := json.Marshal(u)

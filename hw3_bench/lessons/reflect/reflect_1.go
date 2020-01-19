@@ -20,7 +20,8 @@ func PrintReflect(u interface{}) error {
 		valueField := val.Field(i)
 		typeField := val.Type().Field(i)
 
-		fmt.Printf("\tname=%v, type=%v, value=%v, tag=`%v`\n", typeField.Name,
+		fmt.Printf("\tname=%v, type=%v, value=%v, tag=`%v`\n",
+			typeField.Name,
 			typeField.Type.Kind(),
 			valueField,
 			typeField.Tag,
