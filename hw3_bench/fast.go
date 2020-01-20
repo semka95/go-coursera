@@ -1,17 +1,37 @@
-package main
+package fast
 
 import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"io"
-	"log"
 	"os"
 	"strings"
+
+	"github.com/mailru/easyjson"
 )
 
-// вам надо написать более быструю оптимальную этой функции
+//easyjson:json
+type User struct {
+	Browsers []string `json:"browsers"`
+	Name     string   `json:"name,string"`
+	Email    string   `json:"email,string"`
+}
+
+func tSearch() {
+	file, err := os.Open(filePath)
+	if err != nil {
+		panic(err)
+	}
+
+	u := &User{}
+
+	easyjson.UnmarshalFromReader(file, u)
+	fmt.Println(u)
+}
+
 func FastSearch(out io.Writer) {
+	tSearch()
 	file, err := os.Open(filePath)
 	if err != nil {
 		panic(err)
@@ -20,8 +40,11 @@ func FastSearch(out io.Writer) {
 	dec := json.NewDecoder(file)
 
 	seenBrowsers := make(map[uint32]struct{})
-	var foundUsers strings.Builder
 	userNum := 0
+
+	var foundUsers strings.Builder
+	//foundUsers.Grow(1000)
+	fmt.Fprint(&foundUsers, "found users:\n")
 
 	for {
 		isAndroid := false
@@ -32,51 +55,44 @@ func FastSearch(out io.Writer) {
 			break
 		}
 
-		switch t.(type) {
-		case json.Delim:
-			dec.More()
-		case string:
-			tok, ok := t.(string)
-			if !ok {
-				log.Println("cant cast token to string 41")
-				continue
-			}
+		tok, ok := t.(string)
+		if ok {
 			if tok == "browsers" {
+				t, err := dec.Token()
+				if checkTokenErr(t, err) {
+					break
+				}
 				handleBrowser(&isAndroid, &isMSIE, dec, seenBrowsers)
 				if !(isAndroid && isMSIE) {
-					continue // check for switch
+					userNum++
+					continue
 				}
 				handleNameEmail(dec, &foundUsers, userNum)
 				userNum++
 			}
-			dec.More()
 		}
-
 	}
 
-	fmt.Fprintln(out, "found users:\n"+foundUsers.String())
+	fmt.Fprintln(out, foundUsers.String())
 	fmt.Fprintln(out, "Total unique browsers", len(seenBrowsers))
 }
 
 func handleNameEmail(dec *json.Decoder, foundUsers *strings.Builder, userNum int) {
 	name := ""
 	email := ""
-	dec.More() //?
-	for b := dec.More(); b; {
+	for {
 		t, err := dec.Token()
 		if checkTokenErr(t, err) {
 			break
 		}
 
-		tok, ok := t.(string) // refactor
+		tok, ok := t.(string)
 		if !ok {
-			log.Println("cant cast token to string")
-			continue
+			break
 		}
 
 		switch tok {
 		case "email":
-			dec.More()
 			t, err := dec.Token()
 			if checkTokenErr(t, err) {
 				break // this is not working here
@@ -84,13 +100,11 @@ func handleNameEmail(dec *json.Decoder, foundUsers *strings.Builder, userNum int
 
 			email, ok = t.(string) // refactor
 			if !ok {
-				log.Println("cant cast token to string")
+				//log.Println("cant cast token to string")
 				continue
 			}
-			email = strings.ReplaceAll(tok, "@", " [at] ")
-
+			email = strings.ReplaceAll(email, "@", " [at] ")
 		case "name":
-			dec.More()
 			t, err := dec.Token()
 			if checkTokenErr(t, err) {
 				break // this is not working here
@@ -98,7 +112,7 @@ func handleNameEmail(dec *json.Decoder, foundUsers *strings.Builder, userNum int
 
 			name, ok = t.(string) // refactor
 			if !ok {
-				log.Println("cant cast token to string")
+				//log.Println("cant cast token to string")
 				continue
 			}
 		}
@@ -108,47 +122,48 @@ func handleNameEmail(dec *json.Decoder, foundUsers *strings.Builder, userNum int
 }
 
 func handleBrowser(isAndroid, isMSIE *bool, dec *json.Decoder, seenBrowsers map[uint32]struct{}) {
-	dec.More()
 	for {
-		dec.More()
 		t, err := dec.Token()
 		if checkTokenErr(t, err) {
 			break
 		}
 
-		if _, ok := t.(json.Delim); ok {
+		tok, ok := t.(string)
+		if !ok {
 			break
 		}
 
-		tok, ok := t.(string) // refactor
-		if !ok {
-			log.Println("cant cast token to string 120", t)
+		if strings.Contains(tok, "Android") {
+			seenBrowsers[crc32.ChecksumIEEE([]byte(tok))] = struct{}{}
+			*isAndroid = true
+			continue
+		}
+		if strings.Contains(tok, "MSIE") {
+			seenBrowsers[crc32.ChecksumIEEE([]byte(tok))] = struct{}{}
+			*isMSIE = true
 			continue
 		}
 
-		if strings.Contains(tok, "Android") {
-			*isAndroid = true
-		}
-		if strings.Contains(tok, "MSIE") {
-			*isMSIE = true
-		}
-
-		seenBrowsers[crc32.ChecksumIEEE([]byte(tok))] = struct{}{}
-		dec.More()
 	}
 }
 
 func checkTokenErr(t json.Token, err error) (isBreak bool) {
 	isBreak = false
-	if err != nil && err != io.EOF {
-		log.Println("error happened", err)
-		isBreak = true
-	} else if err == io.EOF { // del elif?
-		log.Println("EOF")
-		isBreak = true
-	}
-	if t == nil {
-		log.Println("t is nil")
+	// if err != nil && err != io.EOF {
+	// 	//log.Println("error happened: ", err)
+	// 	isBreak = true
+	// 	return
+	// }
+	// if err == io.EOF {
+	// 	//log.Println("EOF")
+	// 	isBreak = true
+	// 	return
+	// }
+	// if t == nil {
+	// 	//log.Println("t is nil")
+	// 	isBreak = true
+	// }
+	if err != nil || err == io.EOF || t == nil {
 		isBreak = true
 	}
 	return
