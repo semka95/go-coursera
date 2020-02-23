@@ -34,7 +34,7 @@ func TestPipeline(t *testing.T) {
 			}
 		}),
 		job(func(in, out chan interface{}) {
-			for _ = range in {
+			for range in {
 				atomic.AddUint32(&recieved, 1)
 			}
 		}),
