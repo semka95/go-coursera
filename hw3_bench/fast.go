@@ -27,7 +27,7 @@ func tSearch() {
 	u := &User{}
 
 	easyjson.UnmarshalFromReader(file, u)
-	fmt.Println(u)
+	//fmt.Println(u)
 }
 
 func FastSearch(out io.Writer) {
