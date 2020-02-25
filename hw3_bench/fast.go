@@ -1,14 +1,12 @@
 package fast
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"os"
 	"strings"
-
-	"github.com/mailru/easyjson"
 )
 
 //easyjson:json
@@ -18,7 +16,7 @@ type User struct {
 	Email    string   `json:"email,string"`
 }
 
-func tSearch() {
+func FastSearch(out io.Writer) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		panic(err)
@@ -26,12 +24,45 @@ func tSearch() {
 
 	u := &User{}
 
-	easyjson.UnmarshalFromReader(file, u)
-	//fmt.Println(u)
+	var foundUsers strings.Builder
+	foundUsers.Grow(5000)
+	fmt.Fprint(&foundUsers, "found users:\n")
+
+	seenBrowsers := make(map[string]struct{})
+	userNum := 0
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		isAndroid := false
+		isMSIE := false
+		u.UnmarshalJSON(scanner.Bytes())
+
+		for _, browser := range u.Browsers {
+			if ok := strings.Contains(browser, "Android"); ok {
+				seenBrowsers[browser] = struct{}{}
+				isAndroid = true
+				continue
+			}
+			if ok := strings.Contains(browser, "MSIE"); ok {
+				seenBrowsers[browser] = struct{}{}
+				isMSIE = true
+				continue
+			}
+		}
+
+		if !(isAndroid && isMSIE) {
+			userNum++
+			continue
+		}
+		fmt.Fprintf(&foundUsers, "[%d] %s <%s>\n", userNum, u.Name, strings.ReplaceAll(u.Email, "@", " [at] "))
+		userNum++
+	}
+
+	fmt.Fprintln(out, foundUsers.String())
+	fmt.Fprintln(out, "Total unique browsers", len(seenBrowsers))
 }
 
-func FastSearch(out io.Writer) {
-	tSearch()
+func OldFastSearch(out io.Writer) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		panic(err)
@@ -39,11 +70,11 @@ func FastSearch(out io.Writer) {
 
 	dec := json.NewDecoder(file)
 
-	seenBrowsers := make(map[uint32]struct{})
+	seenBrowsers := make(map[string]struct{})
 	userNum := 0
 
 	var foundUsers strings.Builder
-	//foundUsers.Grow(1000)
+	foundUsers.Grow(1000)
 	fmt.Fprint(&foundUsers, "found users:\n")
 
 	for {
@@ -121,7 +152,7 @@ func handleNameEmail(dec *json.Decoder, foundUsers *strings.Builder, userNum int
 	fmt.Fprintf(foundUsers, "[%d] %s <%s>\n", userNum, name, email)
 }
 
-func handleBrowser(isAndroid, isMSIE *bool, dec *json.Decoder, seenBrowsers map[uint32]struct{}) {
+func handleBrowser(isAndroid, isMSIE *bool, dec *json.Decoder, seenBrowsers map[string]struct{}) {
 	for {
 		t, err := dec.Token()
 		if checkTokenErr(t, err) {
@@ -134,12 +165,12 @@ func handleBrowser(isAndroid, isMSIE *bool, dec *json.Decoder, seenBrowsers map[
 		}
 
 		if strings.Contains(tok, "Android") {
-			seenBrowsers[crc32.ChecksumIEEE([]byte(tok))] = struct{}{}
+			seenBrowsers[tok] = struct{}{}
 			*isAndroid = true
 			continue
 		}
 		if strings.Contains(tok, "MSIE") {
-			seenBrowsers[crc32.ChecksumIEEE([]byte(tok))] = struct{}{}
+			seenBrowsers[tok] = struct{}{}
 			*isMSIE = true
 			continue
 		}

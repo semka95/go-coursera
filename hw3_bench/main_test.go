@@ -30,6 +30,20 @@ func TestSearch(t *testing.T) {
 	}
 }
 
+func TestOldSearch(t *testing.T) {
+	slowOut := new(bytes.Buffer)
+	SlowSearch(slowOut)
+	slowResult := slowOut.String()
+
+	oldOut := new(bytes.Buffer)
+	OldFastSearch(oldOut)
+	oldResult := oldOut.String()
+
+	if slowResult != oldResult {
+		t.Errorf("results not match\nGot:\n%v\nExpected:\n%v", oldResult, slowResult)
+	}
+}
+
 // -----
 // go test -bench . -benchmem
 
@@ -42,5 +56,11 @@ func BenchmarkSlow(b *testing.B) {
 func BenchmarkFast(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		FastSearch(ioutil.Discard)
+	}
+}
+
+func BenchmarkOld(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		OldFastSearch(ioutil.Discard)
 	}
 }
