@@ -157,9 +157,10 @@ func TestFindUsers(t *testing.T) {
 		Name   string
 		Input  SearchRequest
 		Output SearchResponse
+		Error  string
 	}{
 		{
-			Name: "test limit < 0",
+			Name: "test limit less then 0",
 			Input: SearchRequest{
 				Limit:      -1,
 				Offset:     1,
@@ -168,6 +169,7 @@ func TestFindUsers(t *testing.T) {
 				OrderBy:    -1,
 			},
 			Output: SearchResponse{},
+			Error:  "limit must be > 0",
 		},
 	}
 
@@ -180,7 +182,19 @@ func TestFindUsers(t *testing.T) {
 				URL:         ts.URL,
 			}
 
-			result, err := s.FindUsers(test.Input)
+			_, err := s.FindUsers(test.Input)
+			assertError(t, err, test.Error)
 		})
+	}
+}
+
+func assertError(t *testing.T, got error, want string) {
+	t.Helper()
+	if got == nil {
+		t.Fatal("didn't get an error but wanted one")
+	}
+
+	if got.Error() != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
