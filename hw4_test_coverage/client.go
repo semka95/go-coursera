@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 const (
@@ -18,7 +19,7 @@ const (
 
 var (
 	errTest = errors.New("testing")
-	client  = &http.Client{}
+	client  = &http.Client{Timeout: time.Second}
 )
 
 type User struct {

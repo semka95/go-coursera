@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,9 +26,17 @@ var (
 // код писать тут
 func SearchServer(w http.ResponseWriter, r *http.Request) {
 	query := r.FormValue("query")
+
 	orderField := r.FormValue("order_field")
 	if orderField == "" {
 		orderField = "Name"
+	}
+
+	orderBy, err := strconv.Atoi(r.FormValue("order_by"))
+	if err != nil || orderBy < -1 || orderBy > 1 {
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"error": "bad order by"}`)
+		return
 	}
 
 	accessToken := r.Header.Get("AccessToken")
@@ -76,9 +85,12 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 
 	// add errors
 	records := getRecords(query)
-	/// !!! check
-	records = records[offset : offset+limit-1]
-	sortRecords(records, orderField)
+	if offset+limit > len(records) {
+		records = records[offset:len(records)]
+	} else {
+		records = records[offset : offset+limit]
+	}
+	sortRecords(records, orderField, orderBy)
 
 	json, err := json.Marshal(records)
 	if err != nil {
@@ -95,7 +107,7 @@ func getRecords(query string) []User {
 		panic(err)
 	}
 
-	users := make([]User, 100)
+	users := make([]User, 0)
 	u := User{}
 	firstName := ""
 	lastName := ""
@@ -119,41 +131,17 @@ func getRecords(query string) []User {
 			case "row":
 				u = User{}
 			case "id":
-				temp := 0
-				if err := decoder.DecodeElement(&temp, &tok); err != nil {
-					fmt.Println("error happend", err)
-				}
-				u.Id = temp
+				u.Id = decodeInt(&tok, decoder)
 			case "first_name":
-				temp := ""
-				if err := decoder.DecodeElement(&temp, &tok); err != nil {
-					fmt.Println("error happend", err)
-				}
-				firstName = temp
+				firstName = decodeString(&tok, decoder)
 			case "last_name":
-				temp := ""
-				if err := decoder.DecodeElement(&temp, &tok); err != nil {
-					fmt.Println("error happend", err)
-				}
-				lastName = temp
+				lastName = decodeString(&tok, decoder)
 			case "age":
-				temp := 0
-				if err := decoder.DecodeElement(&temp, &tok); err != nil {
-					fmt.Println("error happend", err)
-				}
-				u.Age = temp
+				u.Age = decodeInt(&tok, decoder)
 			case "about":
-				temp := ""
-				if err := decoder.DecodeElement(&temp, &tok); err != nil {
-					fmt.Println("error happend", err)
-				}
-				u.About = temp
+				u.About = decodeString(&tok, decoder)
 			case "gender":
-				temp := ""
-				if err := decoder.DecodeElement(&temp, &tok); err != nil {
-					fmt.Println("error happend", err)
-				}
-				u.Gender = temp
+				u.Gender = decodeString(&tok, decoder)
 			}
 		case xml.EndElement:
 			if tok.Name.Local == "row" {
@@ -172,15 +160,43 @@ func fillUser(decoder *xml.Decoder, tok *xml.StartElement, u *User) {
 
 }
 
-func sortRecords(users []User, orderField string) {
+func decodeInt(tok *xml.StartElement, decoder *xml.Decoder) (elem int) {
+	if err := decoder.DecodeElement(&elem, tok); err != nil {
+		fmt.Println("error happend", err)
+	}
+	return
+}
+
+func decodeString(tok *xml.StartElement, decoder *xml.Decoder) (elem string) {
+	if err := decoder.DecodeElement(&elem, tok); err != nil {
+		fmt.Println("error happend", err)
+	}
+	return
+}
+
+func sortRecords(users []User, orderField string, orderBy int) {
+	if orderBy == 0 {
+		return
+	}
 	switch orderField {
 	case "Name":
-		// !!! check
-		sort.Slice(users, func(i, j int) bool { return strings.Compare(users[i].Name, users[j].Name) == -1 })
+		if orderBy == 1 {
+			sort.Slice(users, func(i, j int) bool { return strings.Compare(users[i].Name, users[j].Name) == -1 })
+			break
+		}
+		sort.Slice(users, func(i, j int) bool { return strings.Compare(users[i].Name, users[j].Name) == 1 })
 	case "Age":
-		sort.Slice(users, func(i, j int) bool { return users[i].Age < users[j].Age })
+		if orderBy == 1 {
+			sort.Slice(users, func(i, j int) bool { return users[i].Age < users[j].Age })
+			break
+		}
+		sort.Slice(users, func(i, j int) bool { return users[i].Age > users[j].Age })
 	case "Id":
-		sort.Slice(users, func(i, j int) bool { return users[i].Id < users[j].Id })
+		if orderBy == 1 {
+			sort.Slice(users, func(i, j int) bool { return users[i].Id < users[j].Id })
+			break
+		}
+		sort.Slice(users, func(i, j int) bool { return users[i].Id > users[j].Id })
 	}
 }
 
@@ -251,13 +267,13 @@ func TestFindUsers(t *testing.T) {
 		},
 	}
 
+	s := &SearchClient{
+		AccessToken: "ok",
+		URL:         ts.URL,
+	}
+
 	for _, test := range cases {
 		t.Run(test.Name, func(t *testing.T) {
-			s := &SearchClient{
-				AccessToken: "ok",
-				URL:         ts.URL,
-			}
-
 			_, err := s.FindUsers(test.Input)
 			assertError(t, err, test.Error)
 		})
@@ -312,26 +328,78 @@ func TestFindUsers__BadAccessToken(t *testing.T) {
 }
 
 func TestFindUsers__Ok(t *testing.T) {
-	req := SearchRequest{
-		Query:      "esse",
-		OrderField: "Id",
-		Limit:      10,
-		Offset:     1,
-		OrderBy:    0,
+	cases := []struct {
+		Name   string
+		Input  SearchRequest
+		Output SearchResponse
+	}{
+		{
+			Name: "test data length equals limit",
+			Input: SearchRequest{
+				Query:      "esse",
+				OrderField: "Name",
+				Limit:      2,
+				Offset:     1,
+				OrderBy:    0,
+			},
+			Output: SearchResponse{
+				Users: []User{
+					User{
+						Id:     3,
+						Name:   "Everett Dillard",
+						Age:    27,
+						About:  "Sint eu id sint irure officia amet cillum. Amet consectetur enim mollit culpa laborum ipsum adipisicing est laboris. Adipisicing fugiat esse dolore aliquip quis laborum aliquip dolore. Pariatur do elit eu nostrud occaecat.\n",
+						Gender: "male",
+					},
+					User{
+						Id:     4,
+						Name:   "Owen Lynn",
+						Age:    30,
+						About:  "Elit anim elit eu et deserunt veniam laborum commodo irure nisi ut labore reprehenderit fugiat. Ipsum adipisicing labore ullamco occaecat ut. Ea deserunt ad dolor eiusmod aute non enim adipisicing sit ullamco est ullamco. Elit in proident pariatur elit ullamco quis. Exercitation amet nisi fugiat voluptate esse sit et consequat sit pariatur labore et.\n",
+						Gender: "male",
+					},
+				},
+				NextPage: true,
+			},
+		},
+		{
+			Name: "test data length less than limit",
+			Input: SearchRequest{
+				Query:      "esse",
+				OrderField: "Id",
+				Limit:      5,
+				Offset:     14,
+				OrderBy:    0,
+			},
+			Output: SearchResponse{
+				Users: []User{
+					User{
+						Id:     33,
+						Name:   "Twila Snow",
+						Age:    36,
+						About:  "Sint non sunt adipisicing sit laborum cillum magna nisi exercitation. Dolore officia esse dolore officia ea adipisicing amet ea nostrud elit cupidatat laboris. Proident culpa ullamco aute incididunt aute. Laboris et nulla incididunt consequat pariatur enim dolor incididunt adipisicing enim fugiat tempor ullamco. Amet est ullamco officia consectetur cupidatat non sunt laborum nisi in ex. Quis labore quis ipsum est nisi ex officia reprehenderit ad adipisicing fugiat. Labore fugiat ea dolore exercitation sint duis aliqua.\n",
+						Gender: "female",
+					},
+				},
+				NextPage: false,
+			},
+		},
 	}
-
-	newSearcherParams(&req)
 
 	s := &SearchClient{
 		AccessToken: "ok",
 		URL:         ts.URL,
 	}
 
-	want := ""
+	for _, test := range cases {
+		t.Run(test.Name, func(t *testing.T) {
 
-	_, err := s.FindUsers(req)
+			// add assertNoErr?
+			got, _ := s.FindUsers(test.Input)
+			assertEqual(t, got, &test.Output)
+		})
+	}
 
-	assertError(t, err, want)
 }
 
 func newSearcherParams(req *SearchRequest) url.Values {
@@ -352,5 +420,16 @@ func assertError(t *testing.T, got error, want string) {
 
 	if got.Error() != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func assertEqual(t *testing.T, got *SearchResponse, want *SearchResponse) {
+	t.Helper()
+	if got == nil {
+		t.Fatal("didn't get any data but wanted one")
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }
