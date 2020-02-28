@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 )
 
 const (
@@ -19,7 +18,7 @@ const (
 
 var (
 	errTest = errors.New("testing")
-	client  = &http.Client{Timeout: time.Second}
+	client  = &http.Client{}
 )
 
 type User struct {
@@ -89,7 +88,7 @@ func (srv *SearchClient) FindUsers(req SearchRequest) (*SearchResponse, error) {
 
 	searcherReq, err := http.NewRequest("GET", srv.URL+"?"+searcherParams.Encode(), nil)
 	searcherReq.Header.Add("AccessToken", srv.AccessToken)
-	
+
 	resp, err := client.Do(searcherReq)
 	if err != nil {
 		if err, ok := err.(net.Error); ok && err.Timeout() {
