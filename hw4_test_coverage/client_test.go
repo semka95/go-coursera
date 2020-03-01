@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,13 +18,12 @@ import (
 	"time"
 )
 
-const filePath string = "./data/dataset.xml"
+const filePath string = "dataset.xml"
 
 var (
 	ts = httptest.NewServer(http.HandlerFunc(SearchServer))
 )
 
-// код писать тут
 func SearchServer(w http.ResponseWriter, r *http.Request) {
 	query := r.FormValue("query")
 
@@ -34,25 +34,25 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 
 	orderBy, err := strconv.Atoi(r.FormValue("order_by"))
 	if err != nil || orderBy < -1 || orderBy > 1 {
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, `{"error": "bad order by"}`)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	accessToken := r.Header.Get("AccessToken")
 	if accessToken == "bad_token" {
 		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{"error": "bad access token"}`)
 		return
 	}
 
 	offset, err := strconv.Atoi(r.FormValue("offset"))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	limit, err := strconv.Atoi(r.FormValue("limit"))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -63,6 +63,7 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 		return
 	case "__internal_error":
 		w.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(w, `{"error": "internal server error"}`)
 		return
 	case "__timeout_error":
 		time.Sleep(2 * time.Second)
@@ -84,7 +85,12 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// add errors
-	records := getRecords(query)
+	records, err := getRecords(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	if offset+limit > len(records) {
 		records = records[offset:len(records)]
 	} else {
@@ -101,51 +107,36 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 	w.Write(json)
 }
 
-func getRecords(query string) []User {
+func getRecords(query string) ([]User, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	users := make([]User, 0)
 	u := User{}
-	firstName := ""
-	lastName := ""
 
 	decoder := xml.NewDecoder(file)
 
 	for {
 		tok, tokenErr := decoder.Token()
 		if tokenErr != nil && tokenErr != io.EOF {
-			fmt.Println("error happend", tokenErr)
-			break
+			return nil, err
 		} else if tokenErr == io.EOF {
 			break
 		}
 		if tok == nil {
-			fmt.Println("t is nil break")
+			log.Println("token is nil")
+			continue
 		}
 		switch tok := tok.(type) {
 		case xml.StartElement:
-			switch tok.Name.Local {
-			case "row":
-				u = User{}
-			case "id":
-				u.Id = decodeInt(&tok, decoder)
-			case "first_name":
-				firstName = decodeString(&tok, decoder)
-			case "last_name":
-				lastName = decodeString(&tok, decoder)
-			case "age":
-				u.Age = decodeInt(&tok, decoder)
-			case "about":
-				u.About = decodeString(&tok, decoder)
-			case "gender":
-				u.Gender = decodeString(&tok, decoder)
+			err := fillUser(decoder, &tok, &u)
+			if err != nil {
+				log.Printf("error decoding token: %v", err)
 			}
 		case xml.EndElement:
 			if tok.Name.Local == "row" {
-				u.Name = firstName + " " + lastName
 				if strings.Contains(u.About, query) || strings.Contains(u.Name, query) {
 					users = append(users, u)
 				}
@@ -153,25 +144,49 @@ func getRecords(query string) []User {
 		}
 	}
 
-	return users
+	return users, nil
 }
 
-func fillUser(decoder *xml.Decoder, tok *xml.StartElement, u *User) {
-
-}
-
-func decodeInt(tok *xml.StartElement, decoder *xml.Decoder) (elem int) {
-	if err := decoder.DecodeElement(&elem, tok); err != nil {
-		fmt.Println("error happend", err)
+func fillUser(decoder *xml.Decoder, tok *xml.StartElement, u *User) (err error) {
+	switch tok.Name.Local {
+	case "row":
+		*u = User{}
+	case "id":
+		u.Id, err = decodeInt(tok, decoder)
+	case "first_name":
+		if u.Name != "" {
+			fname, err := decodeString(tok, decoder)
+			u.Name = fmt.Sprintf("%s%s", fname, u.Name)
+			return err
+		}
+		u.Name, err = decodeString(tok, decoder)
+	case "last_name":
+		lname, err := decodeString(tok, decoder)
+		u.Name = fmt.Sprintf("%s %s", u.Name, lname)
+		return err
+	case "age":
+		u.Age, err = decodeInt(tok, decoder)
+	case "about":
+		u.About, err = decodeString(tok, decoder)
+	case "gender":
+		u.Gender, err = decodeString(tok, decoder)
 	}
+
 	return
 }
 
-func decodeString(tok *xml.StartElement, decoder *xml.Decoder) (elem string) {
-	if err := decoder.DecodeElement(&elem, tok); err != nil {
-		fmt.Println("error happend", err)
+func decodeInt(tok *xml.StartElement, decoder *xml.Decoder) (elem int, err error) {
+	if err = decoder.DecodeElement(&elem, tok); err != nil {
+		return 0, err
 	}
-	return
+	return elem, err
+}
+
+func decodeString(tok *xml.StartElement, decoder *xml.Decoder) (elem string, err error) {
+	if err = decoder.DecodeElement(&elem, tok); err != nil {
+		return "", err
+	}
+	return elem, err
 }
 
 func sortRecords(users []User, orderField string, orderBy int) {
@@ -314,7 +329,6 @@ func TestFindUsers__IncorrectURL(t *testing.T) {
 
 func TestFindUsers__BadAccessToken(t *testing.T) {
 	req := SearchRequest{}
-
 	s := &SearchClient{
 		AccessToken: "bad_token",
 		URL:         ts.URL,
@@ -393,9 +407,9 @@ func TestFindUsers__Ok(t *testing.T) {
 
 	for _, test := range cases {
 		t.Run(test.Name, func(t *testing.T) {
+			got, err := s.FindUsers(test.Input)
 
-			// add assertNoErr?
-			got, _ := s.FindUsers(test.Input)
+			assertNoError(t, err)
 			assertEqual(t, got, &test.Output)
 		})
 	}
@@ -420,6 +434,13 @@ func assertError(t *testing.T, got error, want string) {
 
 	if got.Error() != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func assertNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("didn't expect an error but got one, %v", err)
 	}
 }
 
