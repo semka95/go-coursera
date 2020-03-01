@@ -22,6 +22,13 @@ func FastSearch(out io.Writer) {
 		panic(err)
 	}
 
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			panic(err)
+		}
+	}()
+
 	u := &User{}
 
 	var foundUsers strings.Builder
@@ -67,6 +74,13 @@ func OldFastSearch(out io.Writer) {
 	if err != nil {
 		panic(err)
 	}
+
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	dec := json.NewDecoder(file)
 

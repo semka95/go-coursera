@@ -113,6 +113,13 @@ func getRecords(query string) ([]User, error) {
 		return nil, err
 	}
 
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			panic(err)
+		}
+	}()
+
 	users := make([]User, 0)
 	u := User{}
 
