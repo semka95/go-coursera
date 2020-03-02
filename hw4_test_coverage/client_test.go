@@ -361,7 +361,7 @@ func TestFindUsers__Ok(t *testing.T) {
 				OrderField: "Name",
 				Limit:      2,
 				Offset:     1,
-				OrderBy:    0,
+				OrderBy:    OrderByAsIs,
 			},
 			Output: SearchResponse{
 				Users: []User{
@@ -390,7 +390,7 @@ func TestFindUsers__Ok(t *testing.T) {
 				OrderField: "Id",
 				Limit:      5,
 				Offset:     14,
-				OrderBy:    0,
+				OrderBy:    OrderByAsIs,
 			},
 			Output: SearchResponse{
 				Users: []User{
