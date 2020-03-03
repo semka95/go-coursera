@@ -58,7 +58,7 @@ func main() {
 	port := 8080
 
 	// std
-	fmt.Printf("STD starting server at %s:%d", addr, port)
+	fmt.Printf("STD starting server at %s:%d\n", addr, port)
 
 	// std
 	log.Printf("STD starting server at %s:%d", addr, port)

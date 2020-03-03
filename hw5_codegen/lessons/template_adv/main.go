@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"coursera/template_adv/item"
-	"coursera/template_adv/template"
+	"./template"
+
+	"./item"
 )
 
 //go:generate hero -source=./template/
