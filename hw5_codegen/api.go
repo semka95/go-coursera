@@ -123,33 +123,33 @@ func (srv *MyApi) Create(ctx context.Context, in CreateParams) (*NewUser, error)
 // код, созданный вашим кодогенератором работает с конкретной струткурой, про другие ничего не знает
 // поэтому то что рядом есть ещё походая структура с такими же методами его нисколько не смущает
 
-type OtherApi struct {
-}
+// type OtherApi struct {
+// }
 
-func NewOtherApi() *OtherApi {
-	return &OtherApi{}
-}
+// func NewOtherApi() *OtherApi {
+// 	return &OtherApi{}
+// }
 
-type OtherCreateParams struct {
-	Username string `apivalidator:"required,min=3"`
-	Name     string `apivalidator:"paramname=account_name"`
-	Class    string `apivalidator:"enum=warrior|sorcerer|rouge,default=warrior"`
-	Level    int    `apivalidator:"min=1,max=50"`
-}
+// type OtherCreateParams struct {
+// 	Username string `apivalidator:"required,min=3"`
+// 	Name     string `apivalidator:"paramname=account_name"`
+// 	Class    string `apivalidator:"enum=warrior|sorcerer|rouge,default=warrior"`
+// 	Level    int    `apivalidator:"min=1,max=50"`
+// }
 
-type OtherUser struct {
-	ID       uint64 `json:"id"`
-	Login    string `json:"login"`
-	FullName string `json:"full_name"`
-	Level    int    `json:"level"`
-}
+// type OtherUser struct {
+// 	ID       uint64 `json:"id"`
+// 	Login    string `json:"login"`
+// 	FullName string `json:"full_name"`
+// 	Level    int    `json:"level"`
+// }
 
-// apigen:api {"url": "/user/create", "auth": true, "method": "POST"}
-func (srv *OtherApi) Create(ctx context.Context, in OtherCreateParams) (*OtherUser, error) {
-	return &OtherUser{
-		ID:       12,
-		Login:    in.Username,
-		FullName: in.Name,
-		Level:    in.Level,
-	}, nil
-}
+// // apigen:api {"url": "/user/create", "auth": true, "method": "POST"}
+// func (srv *OtherApi) Create(ctx context.Context, in OtherCreateParams) (*OtherUser, error) {
+// 	return &OtherUser{
+// 		ID:       12,
+// 		Login:    in.Username,
+// 		FullName: in.Name,
+// 		Level:    in.Level,
+// 	}, nil
+// }
