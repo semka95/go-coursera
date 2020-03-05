@@ -55,7 +55,10 @@ func (srv *MyApi) handlerProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// write to response
-	answer, _ := json.Marshal(result)
+	answer, err := json.Marshal(result)
+	if err != nil {
+		http.Error(w, `{"error": "error marshaling answer"}`, http.StatusInternalServerError)
+	}
 	w.Write(answer)
 }
 
@@ -115,12 +118,12 @@ func (srv *MyApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, errA := srv.Create(context.Background(), params)
+	u, err := srv.Create(context.Background(), params)
 	// check errors
-	if errA != nil {
+	if err != nil {
 		var e ApiError
-		errText := fmt.Sprintf(`{"error": "%s"}`, errA)
-		if errors.As(errA, &e) {
+		errText := fmt.Sprintf(`{"error": "%s"}`, err)
+		if errors.As(err, &e) {
 			http.Error(w, errText, e.HTTPStatus)
 			return
 		}
@@ -129,14 +132,15 @@ func (srv *MyApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// prepare structure to write to response
-	// resp, _ := json.Marshal(u)
 	result := map[string]interface{}{
 		"error":    "",
 		"response": &u,
 	}
 
 	// write to response
-	answer, _ := json.Marshal(result)
+	answer, err := json.Marshal(result)
+	if err != nil {
+		http.Error(w, `{"error": "error marshaling answer"}`, http.StatusInternalServerError)
+	}
 	w.Write(answer)
-
 }
