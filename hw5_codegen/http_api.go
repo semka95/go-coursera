@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -37,23 +38,14 @@ func (srv *MyApi) handlerProfile(w http.ResponseWriter, r *http.Request) {
 	u, err := srv.Profile(context.Background(), params)
 	// check errors
 	if err != nil {
+		var e ApiError
 		errText := fmt.Sprintf(`{"error": "%s"}`, err)
-		switch err.(type) {
-		case *ApiError:
-			err := err.(*ApiError)
-			http.Error(w, errText, err.HTTPStatus)
-		default:
-			http.Error(w, errText, http.StatusInternalServerError)
+		if errors.As(err, &e) {
+			http.Error(w, errText, e.HTTPStatus)
+			return
 		}
+		http.Error(w, errText, http.StatusInternalServerError)
 		return
-		// var e *ApiError
-		// errText := fmt.Sprintf(`{"error": "%s"}`, err)
-		// if errors.As(err, &e) {
-		// 	http.Error(w, errText, e.HTTPStatus)
-		// 	return
-		// }
-		// http.Error(w, errText, http.StatusInternalServerError)
-		// return
 	}
 
 	// prepare structure to write to response
@@ -126,23 +118,14 @@ func (srv *MyApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 	u, errA := srv.Create(context.Background(), params)
 	// check errors
 	if errA != nil {
+		var e ApiError
 		errText := fmt.Sprintf(`{"error": "%s"}`, errA)
-		switch errA.(type) {
-		case *ApiError:
-			err := errA.(*ApiError)
-			http.Error(w, errText, err.HTTPStatus)
-		default:
-			http.Error(w, errText, http.StatusInternalServerError)
+		if errors.As(errA, &e) {
+			http.Error(w, errText, e.HTTPStatus)
+			return
 		}
+		http.Error(w, errText, http.StatusInternalServerError)
 		return
-		// var e *ApiError
-		// errText := fmt.Sprintf(`{"error": "%s"}`, err)
-		// if errors.As(err, &e) {
-		// 	http.Error(w, errText, e.HTTPStatus)
-		// 	return
-		// }
-		// http.Error(w, errText, http.StatusInternalServerError)
-		// return
 	}
 
 	// prepare structure to write to response
