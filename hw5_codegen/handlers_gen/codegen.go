@@ -7,11 +7,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"html/template"
-	"log"
 	"os"
 	"reflect"
 	"strings"
+	"text/template"
 )
 
 type tpl struct {
@@ -31,14 +30,39 @@ var (
 		"strconv"
 	)`
 
-	auth = `if r.Header.Get("X-Auth") != "100500" {
-		http.Error(w, ` + `{"error": "unauthorized"}` + `, http.StatusForbidden)
+	auth = `	if r.Header.Get("X-Auth") != "100500" {
+		http.Error(w, ` + "`{\"error\": \"unauthorized\"}`" + `, http.StatusForbidden)
 		return
 	}`
 
+	endFunc = `
+	if err != nil {
+		var e ApiError
+		errText := fmt.Sprintf(` + "`{\"error\": \"%s\"}`" + `, err)
+		if errors.As(err, &e) {
+			http.Error(w, errText, e.HTTPStatus)
+			return
+		}
+		http.Error(w, errText, http.StatusInternalServerError)
+		return
+	}
+
+	result := map[string]interface{}{
+		"error":    "",
+		"response": &u,
+	}
+
+	answer, err := json.Marshal(result)
+	if err != nil {
+		http.Error(w, ` + "`{\"error\": \"error marshaling answer\"}`" + `, http.StatusInternalServerError)
+	}
+	w.Write(answer)
+}
+`
+
 	validateRequiredTpl = template.Must(template.New("validateRequiredTpl").Parse(`
 	if params.{{.FieldName}} == "" {
-		http.Error(w, ` + `{"error": "{{.ParamName}} must me not empty"}` + `, http.StatusBadRequest)
+		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must me not empty\"}`" + `, http.StatusBadRequest)
 		return
 	}
 	`))
@@ -57,35 +81,35 @@ var (
 
 	validateMinStrTpl = template.Must(template.New("validateMinStrTpl").Parse(`
 	if len(params.{{.FieldName}}) < {{.ParamValue}} {
-		http.Error(w, ` + `{"error": "{{.ParamName}} len must be >= {{.ParamValue}}"}` + `, http.StatusBadRequest)
+		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} len must be >= {{.ParamValue}}\"}`" + `, http.StatusBadRequest)
 		return
 	}
 	`))
 
 	validateMinIntTpl = template.Must(template.New("validateMinIntTpl").Parse(`
 	if params.{{.FieldName}} < {{.ParamValue}} {
-		http.Error(w, ` + `{"error": "{{.ParamName}} must be >= {{.ParamValue}}"}` + `, http.StatusBadRequest)
+		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be >= {{.ParamValue}}\"}`" + `, http.StatusBadRequest)
 		return
 	}
 	`))
 
 	validateMaxIntTpl = template.Must(template.New("validateMaxIntTpl").Parse(`
 	if params.{{.FieldName}} > {{.ParamValue}} {
-		http.Error(w, ` + `{"error": "{{.ParamName}} must be <= {{.ParamValue}}"}` + `, http.StatusBadRequest)
+		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be <= {{.ParamValue}}\"}`" + `, http.StatusBadRequest)
 		return
 	}
 	`))
 
 	validateEnumStrTpl = template.Must(template.New("validateEnumStrTpl").Parse(`
 	if !({{$fname := .FieldName}}{{range $i, $v := .ParamEnum}}{{if eq $i 0}}params.{{$fname}} == "{{$v}}"{{else}} || params.{{$fname}} == "{{$v}}"{{end}}{{end}}) {
-		http.Error(w, ` + `{"error": "{{.ParamName}} must be one of [{{range $i, $v := .ParamEnum}}{{if eq $i 0}}{{$v}}{{else}}, {{$v}}{{end}}{{end}}]"}` + `, http.StatusBadRequest)
+		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be one of [{{range $i, $v := .ParamEnum}}{{if eq $i 0}}{{$v}}{{else}}, {{$v}}{{end}}{{end}}]\"}`" + `, http.StatusBadRequest)
 		return
 	}
 	`))
 
 	validateEnumIntTpl = template.Must(template.New("validateEnumIntTpl").Parse(`
 	if !({{$fname := .FieldName}}{{range $i, $v := .ParamEnum}}{{if eq $i 0}}params.{{$fname}} == {{$v}}{{else}} || params.{{$fname}} == {{$v}}{{end}}{{end}}) {
-		http.Error(w, ` + `{"error": "{{.ParamName}} must be one of [{{range $i, $v := .ParamEnum}}{{if eq $i 0}}{{$v}}{{else}}, {{$v}}{{end}}{{end}}]"}` + `, http.StatusBadRequest)
+		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be one of [{{range $i, $v := .ParamEnum}}{{if eq $i 0}}{{$v}}{{else}}, {{$v}}{{end}}{{end}}]\"}`" + `, http.StatusBadRequest)
 		return
 	}
 	`))
@@ -93,22 +117,7 @@ var (
 	getIntTpl = template.Must(template.New("getIntTpl").Parse(`
 	{{.ParamName}}, err := strconv.Atoi(r.FormValue("{{.ParamName}}"))
 	if err != nil {
-		http.Error(w, ` + `{"error": "{{.ParamName}} must be int"}` + `, http.StatusBadRequest)
-		return
-	}
-	`))
-
-	fillStrTpl = template.Must(template.New("fillStrTpl").Parse(`
-	{{.FieldName}}:  r.FormValue("{{.ParamName}}"),
-	`))
-
-	fillIntTpl = template.Must(template.New("fillIntTpl").Parse(`
-	{{.FieldName}}:  {{.ParamName}},
-	`))
-
-	methodTpl = template.Must(template.New("methodTpl").Parse(`
-	if r.Method != {{.Method}} {
-		http.Error(w, ` + `{"error": "bad method"}` + `, http.StatusNotAcceptable)
+		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be int\"}`" + `, http.StatusBadRequest)
 		return
 	}
 	`))
@@ -136,13 +145,14 @@ func main() {
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, os.Args[1], nil, parser.ParseComments)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err)
+		return
 	}
+
+	out, _ := os.Create(os.Args[2])
 
 	prepFunc := make(map[string][]GenerateFunc)
 	prepStruct := make(map[string][]GenerateFields)
-
-	out, _ := os.Create(os.Args[2])
 
 	for _, f := range node.Decls {
 		if g, ok := f.(*ast.FuncDecl); ok {
@@ -241,6 +251,7 @@ func main() {
 											continue
 										}
 										tagArr[ind] = res.String()
+										tagArr[ind], tagArr[0] = tagArr[0], tagArr[ind]
 										continue
 									}
 									err := validateDefaultIntTpl.Execute(&res, tmpl)
@@ -249,6 +260,7 @@ func main() {
 										continue
 									}
 									tagArr[ind] = res.String()
+									tagArr[ind], tagArr[0] = tagArr[0], tagArr[ind]
 									continue
 								}
 								if strings.HasPrefix(val, "min") {
@@ -320,6 +332,68 @@ func main() {
 
 	// render ServeHTTP
 	for k, v := range prepFunc {
+		fmt.Fprintf(out, "func (srv *%v) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n", k)
+		fmt.Fprintln(out, `	switch r.URL.Path {`)
+		for _, param := range v {
+			fmt.Fprintf(out, "\tcase \"%v\":\n", param.URL)
+			fmt.Fprintf(out, "\t\tsrv.handler%v(w, r)\n", param.Name)
+		}
+		fmt.Fprintln(out, `	default:
+		http.Error(w, `+"`{\"error\": \"unknown method\"}`"+`, http.StatusNotFound)
+	}
+}
+`)
+		fmt.Fprint(out)
+	}
 
+	// render functions
+	for k, v := range prepFunc {
+		for _, param := range v {
+			fmt.Fprintf(out, "func (srv *%v) handler%v(w http.ResponseWriter, r *http.Request) {\n", k, param.Name)
+			fmt.Fprintln(out, `	w.Header().Set("Content-Type", "application/json")
+			`)
+
+			if param.Method != "" {
+				fmt.Fprintf(out, "\tif r.Method != \"%v\" {\n", param.Method)
+				fmt.Fprintln(out, `	http.Error(w, `+"`{\"error\": \"bad method\"}`"+`, http.StatusNotAcceptable)
+		return
+	}`)
+			}
+
+			if param.Auth {
+				fmt.Fprintln(out, auth)
+			}
+
+			structPar := prepStruct[param.InParam]
+			// optimize: don't collect, range map again
+			var validations []string
+			// optimize strings.Builder
+			params := fmt.Sprintf("\tparams := %v{\n", param.InParam)
+			var res bytes.Buffer
+			for _, strP := range structPar {
+				res.Reset()
+				if strP.Type == "int" {
+					err := getIntTpl.Execute(&res, tpl{ParamName: strP.ParamName})
+					if err != nil {
+						fmt.Println("template execute error: ", err.Error())
+						continue
+					}
+					fmt.Fprintln(out, res.String())
+					params += fmt.Sprintf("\t\t%v: %v,\n", strP.Name, strP.ParamName)
+				} else {
+					params += fmt.Sprintf("\t\t%v: r.FormValue(\"%v\"),\n", strP.Name, strP.ParamName)
+				}
+				validations = append(validations, strP.Validations...)
+			}
+			params += "\t}"
+			fmt.Fprintln(out, params)
+
+			for _, s := range validations {
+				fmt.Fprint(out, s)
+			}
+
+			fmt.Fprintf(out, "\n\tu, err := srv.%v(context.Background(), params)", param.Name)
+			fmt.Fprintln(out, endFunc)
+		}
 	}
 }
