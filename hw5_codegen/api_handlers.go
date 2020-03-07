@@ -31,7 +31,6 @@ func (srv *OtherApi) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (srv *MyApi) handlerProfile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	params := ProfileParams{
 		Login: r.FormValue("login"),
 	}
@@ -64,10 +63,8 @@ func (srv *MyApi) handlerProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write(answer)
 }
-
 func (srv *MyApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	if r.Method != "POST" {
 		http.Error(w, `{"error": "bad method"}`, http.StatusNotAcceptable)
 		return
@@ -84,10 +81,10 @@ func (srv *MyApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := CreateParams{
-		Login:  r.FormValue("login"),
-		Name:   r.FormValue("full_name"),
+		Login: r.FormValue("login"),
+		Name: r.FormValue("full_name"),
 		Status: r.FormValue("status"),
-		Age:    age,
+		Age: age,
 	}
 
 	if params.Login == "" {
@@ -142,10 +139,8 @@ func (srv *MyApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write(answer)
 }
-
 func (srv *OtherApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
 	if r.Method != "POST" {
 		http.Error(w, `{"error": "bad method"}`, http.StatusNotAcceptable)
 		return
@@ -163,9 +158,9 @@ func (srv *OtherApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 
 	params := OtherCreateParams{
 		Username: r.FormValue("username"),
-		Name:     r.FormValue("account_name"),
-		Class:    r.FormValue("class"),
-		Level:    level,
+		Name: r.FormValue("account_name"),
+		Class: r.FormValue("class"),
+		Level: level,
 	}
 
 	if params.Username == "" {

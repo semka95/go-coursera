@@ -22,13 +22,13 @@ type tpl struct {
 
 var (
 	imp = `import (
-		"context"
-		"encoding/json"
-		"errors"
-		"fmt"
-		"net/http"
-		"strconv"
-	)`
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+)`
 
 	auth = `	if r.Header.Get("X-Auth") != "100500" {
 		http.Error(w, ` + "`{\"error\": \"unauthorized\"}`" + `, http.StatusForbidden)
@@ -65,54 +65,54 @@ var (
 		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must me not empty\"}`" + `, http.StatusBadRequest)
 		return
 	}
-	`))
+`))
 
 	validateDefaultStrTpl = template.Must(template.New("validateDefaultStrTpl").Parse(`
 	if params.{{.FieldName}} == "" {
 		params.{{.FieldName}} = "{{.ParamValue}}"
 	}
-	`))
+`))
 
 	validateDefaultIntTpl = template.Must(template.New("validateDefaultIntTpl").Parse(`
 	if params.{{.FieldName}} == 0 {
 		params.{{.FieldName}} = {{.ParamValue}}
 	}
-	`))
+`))
 
 	validateMinStrTpl = template.Must(template.New("validateMinStrTpl").Parse(`
 	if len(params.{{.FieldName}}) < {{.ParamValue}} {
 		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} len must be >= {{.ParamValue}}\"}`" + `, http.StatusBadRequest)
 		return
 	}
-	`))
+`))
 
 	validateMinIntTpl = template.Must(template.New("validateMinIntTpl").Parse(`
 	if params.{{.FieldName}} < {{.ParamValue}} {
 		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be >= {{.ParamValue}}\"}`" + `, http.StatusBadRequest)
 		return
 	}
-	`))
+`))
 
 	validateMaxIntTpl = template.Must(template.New("validateMaxIntTpl").Parse(`
 	if params.{{.FieldName}} > {{.ParamValue}} {
 		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be <= {{.ParamValue}}\"}`" + `, http.StatusBadRequest)
 		return
 	}
-	`))
+`))
 
 	validateEnumStrTpl = template.Must(template.New("validateEnumStrTpl").Parse(`
 	if !({{$fname := .FieldName}}{{range $i, $v := .ParamEnum}}{{if eq $i 0}}params.{{$fname}} == "{{$v}}"{{else}} || params.{{$fname}} == "{{$v}}"{{end}}{{end}}) {
 		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be one of [{{range $i, $v := .ParamEnum}}{{if eq $i 0}}{{$v}}{{else}}, {{$v}}{{end}}{{end}}]\"}`" + `, http.StatusBadRequest)
 		return
 	}
-	`))
+`))
 
 	validateEnumIntTpl = template.Must(template.New("validateEnumIntTpl").Parse(`
 	if !({{$fname := .FieldName}}{{range $i, $v := .ParamEnum}}{{if eq $i 0}}params.{{$fname}} == {{$v}}{{else}} || params.{{$fname}} == {{$v}}{{end}}{{end}}) {
 		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be one of [{{range $i, $v := .ParamEnum}}{{if eq $i 0}}{{$v}}{{else}}, {{$v}}{{end}}{{end}}]\"}`" + `, http.StatusBadRequest)
 		return
 	}
-	`))
+`))
 
 	getIntTpl = template.Must(template.New("getIntTpl").Parse(`
 	{{.ParamName}}, err := strconv.Atoi(r.FormValue("{{.ParamName}}"))
@@ -120,20 +120,19 @@ var (
 		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be int\"}`" + `, http.StatusBadRequest)
 		return
 	}
-	`))
+`))
 )
 
-// GenerateFunc stores params for generator
+// GenerateFunc stores parameters of functions to generate
 type GenerateFunc struct {
-	URL      string `json:"url"`
-	Auth     bool   `json:"auth"`
-	Method   string `json:"method"`
-	Name     string
-	InParam  string
-	RetParam string
+	URL     string `json:"url"`
+	Auth    bool   `json:"auth"`
+	Method  string `json:"method"`
+	Name    string
+	InParam string
 }
 
-// GenerateFields stores params of struct fields
+// GenerateFields stores parameters of struct fields to generate
 type GenerateFields struct {
 	Name        string
 	ParamName   string
@@ -150,7 +149,6 @@ func main() {
 	}
 
 	out, _ := os.Create(os.Args[2])
-
 	prepFunc := make(map[string][]GenerateFunc)
 	prepStruct := make(map[string][]GenerateFields)
 
@@ -185,13 +183,9 @@ func main() {
 			reciever := g.Recv.List[0].Type.(*ast.StarExpr).X.(*ast.Ident).Name
 			p.Name = funcName
 			p.InParam = g.Type.Params.List[1].Type.(*ast.Ident).Name
-			p.RetParam = g.Type.Results.List[0].Type.(*ast.StarExpr).X.(*ast.Ident).Name
 			fmt.Printf("FOUND func %#v\n", funcName)
-			if v, ok := prepFunc[reciever]; ok {
-				prepFunc[reciever] = append(v, *p)
-				continue
-			}
-			prepFunc[reciever] = []GenerateFunc{*p}
+			arrGenFunc := prepFunc[reciever]
+			prepFunc[reciever] = append(arrGenFunc, *p)
 		}
 
 		if g, ok := f.(*ast.GenDecl); ok {
@@ -209,23 +203,21 @@ func main() {
 				}
 
 				structName := currType.Name.Name
-				fmt.Printf("process struct %s\n", structName)
+				fmt.Printf("PROCESS struct %s\n", structName)
 
 				for _, field := range currStruct.Fields.List {
-
 					if field.Tag != nil {
 						tag := reflect.StructTag(field.Tag.Value[1 : len(field.Tag.Value)-1])
 						if v, ok := tag.Lookup("apivalidator"); ok {
 							tagArr := strings.Split(v, ",")
-							fType := field.Type.(*ast.Ident).Name
-							fName := field.Names[0].Name
+							fieldType := field.Type.(*ast.Ident).Name
+							fieldName := field.Names[0].Name
 							tmpl := tpl{
-								FieldName: fName,
-								ParamName: strings.ToLower(fName),
+								FieldName: fieldName,
+								ParamName: strings.ToLower(fieldName),
 							}
 
 							var res bytes.Buffer
-
 							for ind, val := range tagArr {
 								res.Reset()
 								if strings.HasPrefix(val, "paramname") {
@@ -235,94 +227,66 @@ func main() {
 								}
 								if strings.HasPrefix(val, "required") {
 									err := validateRequiredTpl.Execute(&res, tmpl)
-									if err != nil {
-										fmt.Println("template execute error: ", err.Error())
-										continue
-									}
+									templateError(err)
 									tagArr[ind] = res.String()
 									continue
 								}
 								if strings.HasPrefix(val, "default") {
 									tmpl.ParamValue = val[8:]
-									if fType == "string" {
+									if fieldType == "string" {
 										err := validateDefaultStrTpl.Execute(&res, tmpl)
-										if err != nil {
-											fmt.Println("template execute error: ", err.Error())
-											continue
-										}
+										templateError(err)
 										tagArr[ind] = res.String()
 										tagArr[ind], tagArr[0] = tagArr[0], tagArr[ind]
 										continue
 									}
 									err := validateDefaultIntTpl.Execute(&res, tmpl)
-									if err != nil {
-										fmt.Println("template execute error: ", err.Error())
-										continue
-									}
+									templateError(err)
 									tagArr[ind] = res.String()
 									tagArr[ind], tagArr[0] = tagArr[0], tagArr[ind]
 									continue
 								}
 								if strings.HasPrefix(val, "min") {
 									tmpl.ParamValue = val[4:]
-									if fType == "string" {
+									if fieldType == "string" {
 										err := validateMinStrTpl.Execute(&res, tmpl)
-										if err != nil {
-											fmt.Println("template execute error: ", err.Error())
-											continue
-										}
-										tagArr[ind] = string(res.Bytes())
+										templateError(err)
+										tagArr[ind] = res.String()
 										continue
 									}
 									err := validateMinIntTpl.Execute(&res, tmpl)
-									if err != nil {
-										fmt.Println("template execute error: ", err.Error())
-										continue
-									}
-									tagArr[ind] = string(res.Bytes())
+									templateError(err)
+									tagArr[ind] = res.String()
 									continue
 								}
 								if strings.HasPrefix(val, "max") {
 									tmpl.ParamValue = val[4:]
 									err := validateMaxIntTpl.Execute(&res, tmpl)
-									if err != nil {
-										fmt.Println("template execute error: ", err.Error())
-										continue
-									}
-									tagArr[ind] = string(res.Bytes())
+									templateError(err)
+									tagArr[ind] = res.String()
 									continue
 								}
 								if strings.HasPrefix(val, "enum") {
 									tmpl.ParamEnum = strings.Split(val[5:], "|")
-									if fType == "string" {
+									if fieldType == "string" {
 										err := validateEnumStrTpl.Execute(&res, tmpl)
-										if err != nil {
-											fmt.Println("template execute error: ", err.Error())
-											continue
-										}
-										tagArr[ind] = string(res.Bytes())
-										fmt.Print(tagArr[ind])
+										templateError(err)
+										tagArr[ind] = res.String()
 										continue
 									}
 									err := validateEnumIntTpl.Execute(&res, tmpl)
-									if err != nil {
-										fmt.Println("template execute error: ", err.Error())
-										continue
-									}
-									tagArr[ind] = string(res.Bytes())
-									fmt.Print(tagArr[ind])
+									templateError(err)
+									tagArr[ind] = res.String()
 									continue
 								}
 							}
 							arr := prepStruct[structName]
-							prepStruct[structName] = append(arr, GenerateFields{Name: fName, ParamName: tmpl.ParamName, Type: fType, Validations: tagArr})
+							prepStruct[structName] = append(arr, GenerateFields{Name: fieldName, ParamName: tmpl.ParamName, Type: fieldType, Validations: tagArr})
 						}
 					}
 				}
-
 			}
 		}
-
 	}
 
 	fmt.Fprintln(out, `package `+node.Name.Name)
@@ -350,12 +314,12 @@ func main() {
 	for k, v := range prepFunc {
 		for _, param := range v {
 			fmt.Fprintf(out, "func (srv *%v) handler%v(w http.ResponseWriter, r *http.Request) {\n", k, param.Name)
-			fmt.Fprintln(out, `	w.Header().Set("Content-Type", "application/json")
-			`)
+			fmt.Fprintln(out, `	w.Header().Set("Content-Type", "application/json")`)
+			fmt.Fprint(out)
 
 			if param.Method != "" {
 				fmt.Fprintf(out, "\tif r.Method != \"%v\" {\n", param.Method)
-				fmt.Fprintln(out, `	http.Error(w, `+"`{\"error\": \"bad method\"}`"+`, http.StatusNotAcceptable)
+				fmt.Fprintln(out, `		http.Error(w, `+"`{\"error\": \"bad method\"}`"+`, http.StatusNotAcceptable)
 		return
 	}`)
 			}
@@ -365,35 +329,38 @@ func main() {
 			}
 
 			structPar := prepStruct[param.InParam]
-			// optimize: don't collect, range map again
 			var validations []string
-			// optimize strings.Builder
-			params := fmt.Sprintf("\tparams := %v{\n", param.InParam)
+			var params strings.Builder
 			var res bytes.Buffer
+
+			fmt.Fprintf(&params, "\tparams := %v{\n", param.InParam)
 			for _, strP := range structPar {
 				res.Reset()
 				if strP.Type == "int" {
 					err := getIntTpl.Execute(&res, tpl{ParamName: strP.ParamName})
-					if err != nil {
-						fmt.Println("template execute error: ", err.Error())
-						continue
-					}
+					templateError(err)
 					fmt.Fprintln(out, res.String())
-					params += fmt.Sprintf("\t\t%v: %v,\n", strP.Name, strP.ParamName)
+					fmt.Fprintf(&params, "\t\t%v: %v,\n", strP.Name, strP.ParamName)
 				} else {
-					params += fmt.Sprintf("\t\t%v: r.FormValue(\"%v\"),\n", strP.Name, strP.ParamName)
+					fmt.Fprintf(&params, "\t\t%v: r.FormValue(\"%v\"),\n", strP.Name, strP.ParamName)
 				}
 				validations = append(validations, strP.Validations...)
 			}
-			params += "\t}"
-			fmt.Fprintln(out, params)
+			fmt.Fprint(&params, "\t}")
+			fmt.Fprintln(out, params.String())
 
 			for _, s := range validations {
 				fmt.Fprint(out, s)
 			}
 
 			fmt.Fprintf(out, "\n\tu, err := srv.%v(context.Background(), params)", param.Name)
-			fmt.Fprintln(out, endFunc)
+			fmt.Fprint(out, endFunc)
 		}
+	}
+}
+
+func templateError(err error) {
+	if err != nil {
+		fmt.Println("template execute error: ", err.Error())
 	}
 }
