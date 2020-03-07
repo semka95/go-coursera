@@ -31,9 +31,9 @@ func (srv *OtherApi) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (srv *MyApi) handlerProfile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	params := ProfileParams{
-		Login: r.FormValue("login"),
-	}
+
+	params := ProfileParams{}
+	params.Login = r.FormValue("login")
 
 	if params.Login == "" {
 		http.Error(w, `{"error": "login must me not empty"}`, http.StatusBadRequest)
@@ -63,6 +63,7 @@ func (srv *MyApi) handlerProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write(answer)
 }
+
 func (srv *MyApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != "POST" {
@@ -74,18 +75,17 @@ func (srv *MyApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	params := CreateParams{}
+	params.Login = r.FormValue("login")
+	params.Name = r.FormValue("full_name")
+	params.Status = r.FormValue("status")
+
 	age, err := strconv.Atoi(r.FormValue("age"))
 	if err != nil {
 		http.Error(w, `{"error": "age must be int"}`, http.StatusBadRequest)
 		return
 	}
-
-	params := CreateParams{
-		Login: r.FormValue("login"),
-		Name: r.FormValue("full_name"),
-		Status: r.FormValue("status"),
-		Age: age,
-	}
+	params.Age = age
 
 	if params.Login == "" {
 		http.Error(w, `{"error": "login must me not empty"}`, http.StatusBadRequest)
@@ -139,6 +139,7 @@ func (srv *MyApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write(answer)
 }
+
 func (srv *OtherApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != "POST" {
@@ -150,18 +151,17 @@ func (srv *OtherApi) handlerCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	params := OtherCreateParams{}
+	params.Username = r.FormValue("username")
+	params.Name = r.FormValue("account_name")
+	params.Class = r.FormValue("class")
+
 	level, err := strconv.Atoi(r.FormValue("level"))
 	if err != nil {
 		http.Error(w, `{"error": "level must be int"}`, http.StatusBadRequest)
 		return
 	}
-
-	params := OtherCreateParams{
-		Username: r.FormValue("username"),
-		Name: r.FormValue("account_name"),
-		Class: r.FormValue("class"),
-		Level: level,
-	}
+	params.Level = level
 
 	if params.Username == "" {
 		http.Error(w, `{"error": "username must me not empty"}`, http.StatusBadRequest)

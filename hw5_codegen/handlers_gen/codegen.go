@@ -120,6 +120,7 @@ var (
 		http.Error(w, ` + "`{\"error\": \"{{.ParamName}} must be int\"}`" + `, http.StatusBadRequest)
 		return
 	}
+	params.{{.FieldName}} = {{.ParamName}}
 `))
 )
 
@@ -237,6 +238,7 @@ func main() {
 										err := validateDefaultStrTpl.Execute(&res, tmpl)
 										templateError(err)
 										tagArr[ind] = res.String()
+										// making sure default validation higher than other validations
 										tagArr[ind], tagArr[0] = tagArr[0], tagArr[ind]
 										continue
 									}
@@ -292,17 +294,16 @@ func main() {
 	fmt.Fprintln(out, `package `+node.Name.Name)
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, imp)
-	fmt.Fprintln(out)
 
 	// render ServeHTTP
 	for k, v := range prepFunc {
-		fmt.Fprintf(out, "func (srv *%v) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n", k)
+		fmt.Fprintf(out, "\nfunc (srv *%v) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n", k)
 		fmt.Fprintln(out, `	switch r.URL.Path {`)
 		for _, param := range v {
 			fmt.Fprintf(out, "\tcase \"%v\":\n", param.URL)
 			fmt.Fprintf(out, "\t\tsrv.handler%v(w, r)\n", param.Name)
 		}
-		fmt.Fprintln(out, `	default:
+		fmt.Fprint(out, `	default:
 		http.Error(w, `+"`{\"error\": \"unknown method\"}`"+`, http.StatusNotFound)
 	}
 }
@@ -313,7 +314,7 @@ func main() {
 	// render functions
 	for k, v := range prepFunc {
 		for _, param := range v {
-			fmt.Fprintf(out, "func (srv *%v) handler%v(w http.ResponseWriter, r *http.Request) {\n", k, param.Name)
+			fmt.Fprintf(out, "\nfunc (srv *%v) handler%v(w http.ResponseWriter, r *http.Request) {\n", k, param.Name)
 			fmt.Fprintln(out, `	w.Header().Set("Content-Type", "application/json")`)
 			fmt.Fprint(out)
 
@@ -330,24 +331,20 @@ func main() {
 
 			structPar := prepStruct[param.InParam]
 			var validations []string
-			var params strings.Builder
 			var res bytes.Buffer
 
-			fmt.Fprintf(&params, "\tparams := %v{\n", param.InParam)
+			fmt.Fprintf(out, "\n\tparams := %v{}\n", param.InParam)
 			for _, strP := range structPar {
 				res.Reset()
-				if strP.Type == "int" {
-					err := getIntTpl.Execute(&res, tpl{ParamName: strP.ParamName})
-					templateError(err)
-					fmt.Fprintln(out, res.String())
-					fmt.Fprintf(&params, "\t\t%v: %v,\n", strP.Name, strP.ParamName)
-				} else {
-					fmt.Fprintf(&params, "\t\t%v: r.FormValue(\"%v\"),\n", strP.Name, strP.ParamName)
-				}
 				validations = append(validations, strP.Validations...)
+				if strP.Type == "int" {
+					err := getIntTpl.Execute(&res, tpl{ParamName: strP.ParamName, FieldName: strP.Name})
+					templateError(err)
+					fmt.Fprint(out, res.String())
+					continue
+				}
+				fmt.Fprintf(out, "\tparams.%v = r.FormValue(\"%v\")\n", strP.Name, strP.ParamName)
 			}
-			fmt.Fprint(&params, "\t}")
-			fmt.Fprintln(out, params.String())
 
 			for _, s := range validations {
 				fmt.Fprint(out, s)
