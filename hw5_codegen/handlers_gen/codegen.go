@@ -18,6 +18,7 @@ type tpl struct {
 	FieldName  string
 	ParamName  string
 	ParamValue string
+	ParamEnum  []string
 }
 
 var (
@@ -75,9 +76,16 @@ var (
 	}
 	`))
 
-	validateEnumTpl = template.Must(template.New("validateEnumTpl").Parse(`
-	if !({{range $i, $v := .ParamValue}} {{if $i eq 0}} params.{{.FieldName}} == "{{$v}}" {{else}} || params.{{.FieldName}} == "{{$v}}"{{end}}{{end}}) {
-		http.Error(w, ` + `{"error": "{{.ParamName}} must be one of [{{range $i, $v := .ParamValue}} {{if $i eq 0}}{{$v}}{{else}}, {{$v}}{{end}}{{end}}]"}` + `, http.StatusBadRequest)
+	validateEnumStrTpl = template.Must(template.New("validateEnumStrTpl").Parse(`
+	if !({{$fname := .FieldName}}{{range $i, $v := .ParamEnum}}{{if eq $i 0}}params.{{$fname}} == "{{$v}}"{{else}} || params.{{$fname}} == "{{$v}}"{{end}}{{end}}) {
+		http.Error(w, ` + `{"error": "{{.ParamName}} must be one of [{{range $i, $v := .ParamEnum}}{{if eq $i 0}}{{$v}}{{else}}, {{$v}}{{end}}{{end}}]"}` + `, http.StatusBadRequest)
+		return
+	}
+	`))
+
+	validateEnumIntTpl = template.Must(template.New("validateEnumIntTpl").Parse(`
+	if !({{$fname := .FieldName}}{{range $i, $v := .ParamEnum}}{{if eq $i 0}}params.{{$fname}} == {{$v}}{{else}} || params.{{$fname}} == {{$v}}{{end}}{{end}}) {
+		http.Error(w, ` + `{"error": "{{.ParamName}} must be one of [{{range $i, $v := .ParamEnum}}{{if eq $i 0}}{{$v}}{{else}}, {{$v}}{{end}}{{end}}]"}` + `, http.StatusBadRequest)
 		return
 	}
 	`))
@@ -106,8 +114,8 @@ var (
 	`))
 )
 
-// GenerateParams stores params for generator
-type GenerateParams struct {
+// GenerateFunc stores params for generator
+type GenerateFunc struct {
 	URL      string `json:"url"`
 	Auth     bool   `json:"auth"`
 	Method   string `json:"method"`
@@ -116,8 +124,10 @@ type GenerateParams struct {
 	RetParam string
 }
 
+// GenerateFields stores params of struct fields
 type GenerateFields struct {
 	Name        string
+	ParamName   string
 	Type        string
 	Validations []string
 }
@@ -129,15 +139,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	prepFunc := make(map[string][]GenerateParams)
+	prepFunc := make(map[string][]GenerateFunc)
 	prepStruct := make(map[string][]GenerateFields)
 
 	out, _ := os.Create(os.Args[2])
-
-	fmt.Fprintln(out, `package `+node.Name.Name)
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, imp)
-	fmt.Fprintln(out)
 
 	for _, f := range node.Decls {
 		if g, ok := f.(*ast.FuncDecl); ok {
@@ -160,7 +165,7 @@ func main() {
 				continue
 			}
 
-			p := &GenerateParams{}
+			p := &GenerateFunc{}
 			err := json.Unmarshal([]byte(g.Doc.List[ind].Text[13:]), p)
 			if err != nil {
 				fmt.Printf("SKIP func %#v wrong params\n", funcName)
@@ -176,7 +181,7 @@ func main() {
 				prepFunc[reciever] = append(v, *p)
 				continue
 			}
-			prepFunc[reciever] = []GenerateParams{*p}
+			prepFunc[reciever] = []GenerateFunc{*p}
 		}
 
 		if g, ok := f.(*ast.GenDecl); ok {
@@ -202,69 +207,119 @@ func main() {
 						tag := reflect.StructTag(field.Tag.Value[1 : len(field.Tag.Value)-1])
 						if v, ok := tag.Lookup("apivalidator"); ok {
 							tagArr := strings.Split(v, ",")
-							tmpl := tpl{
-								FieldName: field.Names[0].Name,
-							}
 							fType := field.Type.(*ast.Ident).Name
+							fName := field.Names[0].Name
+							tmpl := tpl{
+								FieldName: fName,
+								ParamName: strings.ToLower(fName),
+							}
+
 							var res bytes.Buffer
+
 							for ind, val := range tagArr {
+								res.Reset()
+								if strings.HasPrefix(val, "paramname") {
+									tmpl.ParamName = val[10:]
+									tagArr[ind] = ""
+									continue
+								}
 								if strings.HasPrefix(val, "required") {
-									tmpl.ParamName = "required"
-									validateRequiredTpl.Execute(&res, tmpl) // check err !!!
+									err := validateRequiredTpl.Execute(&res, tmpl)
+									if err != nil {
+										fmt.Println("template execute error: ", err.Error())
+										continue
+									}
 									tagArr[ind] = res.String()
 									continue
 								}
 								if strings.HasPrefix(val, "default") {
 									tmpl.ParamValue = val[8:]
 									if fType == "string" {
-										validateDefaultStrTpl.Execute(&res, tmpl) // check err !!!
+										err := validateDefaultStrTpl.Execute(&res, tmpl)
+										if err != nil {
+											fmt.Println("template execute error: ", err.Error())
+											continue
+										}
 										tagArr[ind] = res.String()
 										continue
 									}
-									validateDefaultIntTpl.Execute(&res, tmpl) // check err !!!
+									err := validateDefaultIntTpl.Execute(&res, tmpl)
+									if err != nil {
+										fmt.Println("template execute error: ", err.Error())
+										continue
+									}
 									tagArr[ind] = res.String()
 									continue
 								}
 								if strings.HasPrefix(val, "min") {
 									tmpl.ParamValue = val[4:]
 									if fType == "string" {
-										validateMinStrTpl.Execute(&res, tmpl) // check err !!!
-										tagArr[ind] = res.String()
+										err := validateMinStrTpl.Execute(&res, tmpl)
+										if err != nil {
+											fmt.Println("template execute error: ", err.Error())
+											continue
+										}
+										tagArr[ind] = string(res.Bytes())
 										continue
 									}
-									validateMinIntTpl.Execute(&res, tmpl) // check err !!!
-									tagArr[ind] = res.String()
+									err := validateMinIntTpl.Execute(&res, tmpl)
+									if err != nil {
+										fmt.Println("template execute error: ", err.Error())
+										continue
+									}
+									tagArr[ind] = string(res.Bytes())
 									continue
 								}
 								if strings.HasPrefix(val, "max") {
 									tmpl.ParamValue = val[4:]
-									validateMaxIntTpl.Execute(&res, tmpl) // check err !!!
-									tagArr[ind] = res.String()
+									err := validateMaxIntTpl.Execute(&res, tmpl)
+									if err != nil {
+										fmt.Println("template execute error: ", err.Error())
+										continue
+									}
+									tagArr[ind] = string(res.Bytes())
+									continue
+								}
+								if strings.HasPrefix(val, "enum") {
+									tmpl.ParamEnum = strings.Split(val[5:], "|")
+									if fType == "string" {
+										err := validateEnumStrTpl.Execute(&res, tmpl)
+										if err != nil {
+											fmt.Println("template execute error: ", err.Error())
+											continue
+										}
+										tagArr[ind] = string(res.Bytes())
+										fmt.Print(tagArr[ind])
+										continue
+									}
+									err := validateEnumIntTpl.Execute(&res, tmpl)
+									if err != nil {
+										fmt.Println("template execute error: ", err.Error())
+										continue
+									}
+									tagArr[ind] = string(res.Bytes())
+									fmt.Print(tagArr[ind])
 									continue
 								}
 							}
 							arr := prepStruct[structName]
-							prepStruct[structName] = append(arr, GenerateFields{Name: field.Names[0].Name, Type: fType, Validations: tagArr})
+							prepStruct[structName] = append(arr, GenerateFields{Name: fName, ParamName: tmpl.ParamName, Type: fType, Validations: tagArr})
 						}
 					}
-
-					// fieldName := field.Names[0].Name
-					// fileType := field.Type.(*ast.Ident).Name
-
-					// fmt.Printf("\tgenerating code for field %s.%s\n", currType.Name.Name, fieldName)
-
-					// switch fileType {
-					// case "int":
-					// 	intTpl.Execute(out, tpl{fieldName})
-					// case "string":
-					// 	strTpl.Execute(out, tpl{fieldName})
-					// default:
-					// 	log.Fatalln("unsupported", fileType)
-					// }
 				}
 
 			}
 		}
+
+	}
+
+	fmt.Fprintln(out, `package `+node.Name.Name)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, imp)
+	fmt.Fprintln(out)
+
+	// render ServeHTTP
+	for k, v := range prepFunc {
 
 	}
 }
