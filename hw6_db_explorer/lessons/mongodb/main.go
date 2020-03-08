@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strconv"
 
-	mgo "gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
+	mgo "github.com/globalsign/mgo"
+	"github.com/globalsign/mgo/bson"
 
 	"github.com/gorilla/mux"
 )
@@ -144,7 +144,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	sess, err := mgo.Dial("mongodb://localhost")
+	sess, err := mgo.Dial("mongodb://admin:password@mongodb:27017")
 	__err_panic(err)
 
 	// если коллекции не будет, то она создасться автоматически
