@@ -13,7 +13,7 @@ type TCache struct {
 */
 
 func main() {
-	MemcachedAddresses := []string{"127.0.0.1:11211"}
+	MemcachedAddresses := []string{"memcached:11211"}
 	memcacheClient := memcache.New(MemcachedAddresses...)
 
 	tc := &TCache{memcacheClient}

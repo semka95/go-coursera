@@ -1,0 +1,14 @@
+version: "2.3"
+services:
+  web:
+    image: memcachedgo
+    container_name: memcachedgo
+    depends_on:
+      memcached:
+        condition: service_started
+
+  memcached:
+    image: memcached
+    container_name: memcachedtest
+    ports:
+      - 11211:11211

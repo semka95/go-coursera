@@ -17,9 +17,10 @@ type Item struct {
 }
 
 func GetHabrPosts() (*RSS, error) {
-	fmt.Println("fetching https://habrahabr.ru/rss/best/")
-	resp, err := http.Get("https://habrahabr.ru/rss/best/")
+	fmt.Println("fetching https://habr.com/ru/rss/best/")
+	resp, err := http.Get("https://habr.com/ru/rss/best/")
 	if err != nil {
+		fmt.Println("get error")
 		return nil, err
 	}
 
@@ -29,6 +30,7 @@ func GetHabrPosts() (*RSS, error) {
 	rss := new(RSS)
 	err = xml.Unmarshal(body, rss)
 	if err != nil {
+		fmt.Println("unmarshal error")
 		return nil, err
 	}
 
