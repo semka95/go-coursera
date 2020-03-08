@@ -27,7 +27,7 @@ var loginFormTmpl = `
 func main() {
 
 	// основные настройки к базе
-	dsn := "root@tcp(localhost:3306)/coursera?"
+	dsn := "user:password@tcp(mysql:3306)/coursera?"
 	// указываем кодировку
 	dsn += "&charset=utf8"
 	// отказываемся от prapared statements
