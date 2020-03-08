@@ -1,0 +1,18 @@
+version: "2.3"
+services:
+  web:
+    image: redisgo
+    container_name: redis_api
+    ports:
+      - 8080:8080
+    depends_on:
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:6.0-rc2-alpine
+    container_name: redis
+    ports:
+      - 6379:6379
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes

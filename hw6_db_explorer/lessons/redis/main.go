@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	redisAddr = flag.String("addr", "redis://user:@localhost:6379/0", "redis addr")
+	redisAddr = flag.String("addr", "redis://user:@redis:6379/0", "redis addr")
 
 	sessManager *SessionManager
 
