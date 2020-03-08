@@ -1,0 +1,37 @@
+version: "2.3"
+services:
+  srv:
+    image: rabbitsrv
+    container_name: rabbit_api
+    ports:
+      - 8080:8080
+    depends_on:
+      rabbit:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    volumes:
+      - ./images:/app/images
+
+  worker:
+    image: rabbitworker
+    container_name: rabbit_worker
+    depends_on:
+      rabbit:
+        condition: service_healthy
+    volumes:
+      - ./images:/app/images
+
+  rabbit:
+    image: rabbitmq:3.8-rc-alpine
+    container_name: rabbit
+    ports:
+      - 5672:5672
+    healthcheck:
+      timeout: 5s
+      interval: 5s
+      retries: 5
+      test:
+        - "CMD"
+        - "rabbitmqctl"
+        - "status"

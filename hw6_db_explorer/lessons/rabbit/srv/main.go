@@ -96,7 +96,7 @@ const (
 )
 
 var (
-	rabbitAddr = flag.String("addr", "amqp://guest:guest@192.168.99.100:32778/", "rabbit addr")
+	rabbitAddr = flag.String("addr", "amqp://guest:guest@rabbit:5672/", "rabbit addr")
 
 	rabbitConn *amqp.Connection
 
