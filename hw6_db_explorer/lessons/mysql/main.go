@@ -147,7 +147,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 func main() {
 
 	// основные настройки к базе
-	dsn := "root@tcp(localhost:3306)/coursera?"
+	dsn := "user:password@tcp(mysql:3306)/coursera?"
 	// указываем кодировку
 	dsn += "&charset=utf8"
 	// отказываемся от prapared statements
@@ -165,7 +165,7 @@ func main() {
 
 	handlers := &Handler{
 		DB:   db,
-		Tmpl: template.Must(template.ParseGlob("../crud_templates/*")),
+		Tmpl: template.Must(template.ParseGlob("./crud_templates/*")),
 	}
 
 	// в целям упрощения примера пропущена авторизация и csrf
