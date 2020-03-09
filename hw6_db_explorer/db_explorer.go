@@ -7,10 +7,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-)
 
-// тут вы пишете код
-// обращаю ваше внимание - в этом задании запрещены глобальные переменные
+	"github.com/go-sql-driver/mysql"
+)
 
 type HandlerError struct {
 	Code    int
@@ -42,7 +41,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.handleDelete(w, r)
 	default:
-		http.Error(w, `{"error": "unknown method"}`, http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error": "unknown method"}`))
 	}
 }
 
@@ -50,7 +50,8 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/" {
 		err := h.listTables()
 		if err != nil {
-			http.Error(w, h.Error.Message, h.Error.Code)
+			w.WriteHeader(h.Error.Code)
+			w.Write([]byte(h.Error.Message))
 			fmt.Println(err.Error())
 			return
 		}
@@ -58,13 +59,29 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		path := strings.Split(r.URL.Path, "/")[1:]
 		if len(path) == 1 {
 			err := h.getTableRecords(path[0], r.URL.Query().Get("limit"), r.URL.Query().Get("offset"))
+			if err != nil {
+				w.WriteHeader(h.Error.Code)
+				w.Write([]byte(h.Error.Message))
+				fmt.Println(err.Error())
+				return
+			}
+		}
+		if len(path) == 2 {
+			err := h.getTableRecord(path[0], path[1])
+			if err != nil {
+				w.WriteHeader(h.Error.Code)
+				w.Write([]byte(h.Error.Message))
+				fmt.Println(err.Error())
+				return
+			}
 		}
 
 	}
 
 	answer, err := json.Marshal(h.Result)
 	if err != nil {
-		http.Error(w, `{"error": "error marshaling answer"}`, http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "error marshaling answer"}`))
 	}
 	w.Write(answer)
 }
@@ -87,7 +104,7 @@ func (h *Handler) listTables() error {
 	rows, err := h.DB.Query("SHOW TABLES")
 	if err != nil {
 		h.Error.Code = http.StatusInternalServerError
-		h.Error.Message = `"error": "internal server error"`
+		h.Error.Message = `{"error": "internal server error"}`
 		return err
 	}
 
@@ -96,7 +113,7 @@ func (h *Handler) listTables() error {
 		err = rows.Scan(&table)
 		if err != nil {
 			h.Error.Code = http.StatusInternalServerError
-			h.Error.Message = `"error": "internal server error"`
+			h.Error.Message = `{"error": "internal server error"}`
 			return err
 		}
 		items = append(items, table)
@@ -114,10 +131,141 @@ func (h *Handler) listTables() error {
 }
 
 func (h *Handler) getTableRecords(table, l, o string) error {
-	limit := 5
-	offset := 0
-	if l != "" {
-		limit, err := strconv.Atoi(l)
+	limit, err := strconv.Atoi(l)
+	if err != nil {
+		limit = 5
 	}
+
+	offset, err := strconv.Atoi(o)
+	if err != nil {
+		offset = 0
+	}
+
+	var items []map[string]interface{}
+
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT ? OFFSET ?", table)
+	rows, err := h.DB.Query(query, limit, offset)
+	if err != nil {
+		me, _ := err.(*mysql.MySQLError)
+		if me.Number == 1146 {
+			h.Error.Code = http.StatusNotFound
+			h.Error.Message = `{"error": "unknown table"}`
+			return err
+		}
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return err
+	}
+	columns, _ := rows.ColumnTypes()
+
+	for rows.Next() {
+		value := make([]interface{}, len(columns))
+		for i := range columns {
+			st := columns[i].DatabaseTypeName()
+			switch st {
+			case "INT":
+				value[i] = new(int64)
+			case "FLOAT":
+				value[i] = new(float64)
+			case "VARCHAR":
+				value[i] = new(string)
+			case "TEXT":
+				value[i] = new(string)
+			}
+		}
+
+		err = rows.Scan(value...)
+		if err != nil {
+			h.Error.Code = http.StatusInternalServerError
+			h.Error.Message = `{"error": "internal server error"}`
+			return err
+		}
+
+		item := make(map[string]interface{})
+		for i := range value {
+			item[columns[i].Name()] = value[i]
+		}
+		items = append(items, item)
+	}
+
+	rows.Close()
+
+	h.Result = map[string]interface{}{
+		"response": map[string]interface{}{
+			"records": items,
+		},
+	}
+
+	return nil
+}
+
+func (h *Handler) getTableRecord(table, id string) error {
+	rec, err := strconv.Atoi(id)
+	if err != nil {
+		h.Error.Code = http.StatusBadRequest
+		h.Error.Message = `{"error": "bad id"}`
+		return err
+	}
+
+	var items []map[string]interface{}
+
+	query := fmt.Sprintf("SELECT `COLUMN_NAME` FROM `information_schema`.`COLUMNS` WHERE (`TABLE_NAME` = '%s') AND (`COLUMN_KEY` = 'PRI')", table)
+	row := h.DB.QueryRow(query)
+	field := new(string)
+	row.Scan(&field)
+
+	query = fmt.Sprintf("SELECT * FROM %s WHERE id = ?", table)
+	rows, err := h.DB.Query(query, rec)
+	if err != nil {
+		me, _ := err.(*mysql.MySQLError)
+		if me.Number == 1146 {
+			h.Error.Code = http.StatusNotFound
+			h.Error.Message = `{"error": "unknown table"}`
+			return err
+		}
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return err
+	}
+	columns, _ := rows.ColumnTypes()
+
+	for rows.Next() {
+		value := make([]interface{}, len(columns))
+		for i := range columns {
+			st := columns[i].DatabaseTypeName()
+			switch st {
+			case "INT":
+				value[i] = new(*int64)
+			case "FLOAT":
+				value[i] = new(*float64)
+			case "VARCHAR":
+				value[i] = new(*string)
+			case "TEXT":
+				value[i] = new(*string)
+			}
+		}
+
+		err = rows.Scan(value...)
+		if err != nil {
+			h.Error.Code = http.StatusInternalServerError
+			h.Error.Message = `{"error": "internal server error"}`
+			return err
+		}
+
+		item := make(map[string]interface{})
+		for i := range value {
+			item[columns[i].Name()] = value[i]
+		}
+		items = append(items, item)
+	}
+
+	rows.Close()
+
+	h.Result = map[string]interface{}{
+		"response": map[string]interface{}{
+			"records": items,
+		},
+	}
+
 	return nil
 }
