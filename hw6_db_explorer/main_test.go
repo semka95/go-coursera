@@ -86,7 +86,7 @@ func CleanupTestApis(db *sql.DB) {
 }
 
 func TestApis(t *testing.T) {
-	db, err := sql.Open("mysql", DSN)
+	db, err := sql.Open("mysql", DSNTEST)
 	err = db.Ping()
 	if err != nil {
 		panic(err)

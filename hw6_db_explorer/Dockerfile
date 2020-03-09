@@ -8,7 +8,7 @@ WORKDIR /app
 
 COPY main.go db_explorer.go go.mod go.sum ./
 
-RUN go build -o engine main.go
+RUN go build -o engine *.go
 
 # Distribution
 FROM alpine:latest
@@ -19,7 +19,7 @@ RUN apk update && apk upgrade && \
 
 WORKDIR /app 
 
-EXPOSE 8082
+EXPOSE 8080
 
 COPY --from=builder /app/engine /app
 

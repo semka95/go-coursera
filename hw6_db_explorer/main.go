@@ -14,12 +14,13 @@ var (
 	// DSN это соединение с базой
 	// вы можете изменить этот на тот который вам нужен
 	// docker run -p 3306:3306 -v $(PWD):/docker-entrypoint-initdb.d -e MYSQL_ROOT_PASSWORD=1234 -e MYSQL_DATABASE=golang -d mysql
-	DSN = "user:password@tcp(mysql:3306)/coursera?charset=utf8"
+	DSN     = "user:password@tcp(mysql:3306)/coursera?charset=utf8"
+	DSNTEST = "user:password@tcp(localhost:3306)/coursera?charset=utf8"
 	// DSN = "coursera:5QPbAUufx7@tcp(localhost:3306)/coursera?charset=utf8"
 )
 
 func main() {
-	db, err := sql.Open("mysql", DSN)
+	db, err := sql.Open("mysql", DSNTEST)
 	err = db.Ping() // вот тут будет первое подключение к базе
 	if err != nil {
 		panic(err)
@@ -30,6 +31,6 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println("starting server at :8082")
-	http.ListenAndServe(":8082", handler)
+	fmt.Println("starting server at :8080")
+	http.ListenAndServe(":8080", handler)
 }
