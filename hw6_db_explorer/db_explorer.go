@@ -147,28 +147,60 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	idField := h.getPKColumnName(table)
 
 	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
 	var postVals map[string]interface{}
 	err := decoder.Decode(&postVals)
 
-	q := fmt.Sprintf("SELECT * FROM %s LIMIT 1", table)
-	rows, err := h.DB.Query(q)
-	colTypes, _ := rows.ColumnTypes()
+	colTypes, err := h.getTableColumns(table)
+	if err != nil {
+		w.WriteHeader(h.Error.Code)
+		w.Write([]byte(h.Error.Message))
+		fmt.Println(err.Error())
+		return
+	}
+
 	for k, v := range postVals {
 		if v == nil {
+			if !colTypes[k].IsNullable {
+				w.WriteHeader(http.StatusBadRequest)
+				e := fmt.Sprintf(`{"error": "field %s have invalid type"}`, k)
+				w.Write([]byte(e))
+				return
+			}
+		}
 
-		}
 		valid := false
-		switch v.(type) {
-		case int:
-			valid = colTypes[k] == "int"
-		case string:
-			valid = colTypes[k] == "text" || colTypes[k] == "varchar"
-		case float64:
-			valid = colTypes[k] == "float"
+		if colTypes[k].Type == "int" {
+			val, err := v.(json.Number).Int64()
+			if err != nil {
+				valid = false
+			} else {
+				valid = true
+				postVals[k] = val
+			}
 		}
+
+		if colTypes[k].Type == "text" || colTypes[k].Type == "varchar" {
+			if _, ok := v.(json.Number); ok {
+				valid = false
+			} else {
+				valid = true
+			}
+		}
+
+		if colTypes[k].Type == "float" {
+			val, err := v.(json.Number).Float64()
+			if err != nil {
+				valid = false
+			} else {
+				valid = true
+				postVals[k] = val
+			}
+		}
+
 		if !valid {
 			w.WriteHeader(http.StatusBadRequest)
-			e := fmt.Sprintf(`"error": "field %s have invalid type"`, k)
+			e := fmt.Sprintf(`{"error": "field %s have invalid type"}`, k)
 			w.Write([]byte(e))
 			return
 		}
@@ -415,12 +447,18 @@ func (h *Handler) getPKColumnName(table string) string {
 	return *idField
 }
 
-func (h *Handler) getTableColumns(table string) (map[string]string, error) {
+type column struct {
+	Type       string
+	IsNullable bool
+}
+
+func (h *Handler) getTableColumns(table string) (map[string]column, error) {
 	str1 := ""
 	str2 := ""
-	result := make(map[string]string)
+	isNullstr := ""
+	result := make(map[string]column)
 
-	query := fmt.Sprintf("SELECT `COLUMN_NAME`, `DATA_TYPE` FROM `information_schema`.`COLUMNS` WHERE (`TABLE_NAME` = '%s');", table)
+	query := fmt.Sprintf("SELECT `COLUMN_NAME`, `DATA_TYPE`, `IS_NULLABLE` FROM `information_schema`.`COLUMNS` WHERE (`TABLE_NAME` = '%s');", table)
 
 	rows, err := h.DB.Query(query)
 	if err != nil {
@@ -430,14 +468,21 @@ func (h *Handler) getTableColumns(table string) (map[string]string, error) {
 	}
 
 	for rows.Next() {
-		err = rows.Scan(&str1, &str2)
+		err = rows.Scan(&str1, &str2, &isNullstr)
 		if err != nil {
 			h.Error.Code = http.StatusInternalServerError
 			h.Error.Message = `{"error": "internal server error"}`
 			return nil, err
 		}
 
-		result[str1] = str2
+		var isNull bool
+		if isNullstr == "NO" {
+			isNull = false
+		} else {
+			isNull = true
+		}
+
+		result[str1] = column{Type: str2, IsNullable: isNull}
 	}
 
 	rows.Close()
