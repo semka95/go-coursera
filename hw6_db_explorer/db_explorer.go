@@ -87,9 +87,10 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
 	table := r.URL.Path[1:]
-	postVals := r.PostForm
+	decoder := json.NewDecoder(r.Body)
+	var postVals map[string]interface{}
+	err := decoder.Decode(&postVals)
 	idField := h.getPKColumnName(table)
 	delete(postVals, idField)
 
@@ -99,7 +100,7 @@ func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(&query2, ") VALUES (")
 	values := make([]interface{}, 0, len(postVals))
 	for k, v := range postVals {
-		values = append(values, v[0])
+		values = append(values, v)
 		fmt.Fprintf(&query, "`%s`", k)
 		fmt.Fprintf(&query2, "?")
 		if len(values) != len(postVals) {
@@ -118,13 +119,6 @@ func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(err.Error())
 	}
 
-	_, err = result.RowsAffected()
-	if err != nil {
-		h.Error.Code = http.StatusInternalServerError
-		h.Error.Message = `{"error": "internal server error"}`
-		fmt.Println(err.Error())
-	}
-
 	lastID, err := result.LastInsertId()
 	if err != nil {
 		h.Error.Code = http.StatusInternalServerError
@@ -132,12 +126,10 @@ func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(err.Error())
 	}
 
-	response := map[string]interface{}{
-		idField: lastID,
-	}
-
 	h.Result = map[string]interface{}{
-		"response": response,
+		"response": map[string]interface{}{
+			idField: lastID,
+		},
 	}
 
 	answer, err := json.Marshal(h.Result)
@@ -149,6 +141,62 @@ func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
+	path := strings.Split(r.URL.Path, "/")[1:]
+	table := path[0]
+	id := path[1]
+	idField := h.getPKColumnName(table)
+	decoder := json.NewDecoder(r.Body)
+	var postVals map[string]interface{}
+	err := decoder.Decode(&postVals)
+
+	var query strings.Builder
+	fmt.Fprintf(&query, "UPDATE %v SET ", table)
+	values := make([]interface{}, 0, len(postVals))
+	for k, v := range postVals {
+		if v == nil {
+			fmt.Fprintf(&query, "`%s` = NULL", k)
+			// wrong
+			if len(values) != len(postVals) {
+				fmt.Fprintf(&query, ", ")
+			}
+			continue
+		}
+		values = append(values, v)
+		fmt.Fprintf(&query, "`%s` = ?", k)
+		if len(values) != len(postVals) {
+			fmt.Fprintf(&query, ", ")
+		}
+	}
+	fmt.Fprintf(&query, " WHERE %s = ?", idField)
+	resQuery := query.String()
+	values = append(values, id)
+
+	result, err := h.DB.Exec(resQuery, values...)
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		fmt.Println(err.Error())
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		fmt.Println(err.Error())
+	}
+
+	h.Result = map[string]interface{}{
+		"response": map[string]interface{}{
+			idField: affected,
+		},
+	}
+
+	answer, err := json.Marshal(h.Result)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "error marshaling answer"}`))
+	}
+	w.Write(answer)
 
 }
 
