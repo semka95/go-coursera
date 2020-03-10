@@ -145,49 +145,88 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	table := path[0]
 	id := path[1]
 	idField := h.getPKColumnName(table)
+
 	decoder := json.NewDecoder(r.Body)
 	var postVals map[string]interface{}
 	err := decoder.Decode(&postVals)
 
+	q := fmt.Sprintf("SELECT * FROM %s LIMIT 1", table)
+	rows, err := h.DB.Query(q)
+	colTypes, _ := rows.ColumnTypes()
+	for k, v := range postVals {
+		if v == nil {
+
+		}
+		valid := false
+		switch v.(type) {
+		case int:
+			valid = colTypes[k] == "int"
+		case string:
+			valid = colTypes[k] == "text" || colTypes[k] == "varchar"
+		case float64:
+			valid = colTypes[k] == "float"
+		}
+		if !valid {
+			w.WriteHeader(http.StatusBadRequest)
+			e := fmt.Sprintf(`"error": "field %s have invalid type"`, k)
+			w.Write([]byte(e))
+			return
+		}
+
+	}
+
 	var query strings.Builder
 	fmt.Fprintf(&query, "UPDATE %v SET ", table)
 	values := make([]interface{}, 0, len(postVals))
+	i := 0
 	for k, v := range postVals {
 		if v == nil {
+			i++
 			fmt.Fprintf(&query, "`%s` = NULL", k)
-			// wrong
-			if len(values) != len(postVals) {
+			if i != len(postVals) {
 				fmt.Fprintf(&query, ", ")
 			}
 			continue
 		}
 		values = append(values, v)
+		i++
 		fmt.Fprintf(&query, "`%s` = ?", k)
-		if len(values) != len(postVals) {
+		if i != len(postVals) {
 			fmt.Fprintf(&query, ", ")
 		}
 	}
+
 	fmt.Fprintf(&query, " WHERE %s = ?", idField)
 	resQuery := query.String()
 	values = append(values, id)
 
 	result, err := h.DB.Exec(resQuery, values...)
 	if err != nil {
-		h.Error.Code = http.StatusInternalServerError
-		h.Error.Message = `{"error": "internal server error"}`
+		me, _ := err.(*mysql.MySQLError)
+		if me.Number == 1062 {
+			w.WriteHeader(http.StatusBadRequest)
+			e := fmt.Sprintf(`"error": "field %s have invalid type"`, idField)
+			w.Write([]byte(e))
+			fmt.Println(err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`"error": "internal server error"`))
 		fmt.Println(err.Error())
+		return
 	}
 
 	affected, err := result.RowsAffected()
 	if err != nil {
-		h.Error.Code = http.StatusInternalServerError
-		h.Error.Message = `{"error": "internal server error"}`
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "internal server error"}`))
 		fmt.Println(err.Error())
+		return
 	}
 
 	h.Result = map[string]interface{}{
 		"response": map[string]interface{}{
-			idField: affected,
+			"updated": affected,
 		},
 	}
 
@@ -374,4 +413,33 @@ func (h *Handler) getPKColumnName(table string) string {
 	idField := new(string)
 	row.Scan(&idField)
 	return *idField
+}
+
+func (h *Handler) getTableColumns(table string) (map[string]string, error) {
+	str1 := ""
+	str2 := ""
+	result := make(map[string]string)
+
+	query := fmt.Sprintf("SELECT `COLUMN_NAME`, `DATA_TYPE` FROM `information_schema`.`COLUMNS` WHERE (`TABLE_NAME` = '%s');", table)
+
+	rows, err := h.DB.Query(query)
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return nil, err
+	}
+
+	for rows.Next() {
+		err = rows.Scan(&str1, &str2)
+		if err != nil {
+			h.Error.Code = http.StatusInternalServerError
+			h.Error.Message = `{"error": "internal server error"}`
+			return nil, err
+		}
+
+		result[str1] = str2
+	}
+
+	rows.Close()
+	return result, nil
 }
