@@ -87,11 +87,42 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
-	table := r.URL.Path[1:]
+	table := strings.ReplaceAll(r.URL.Path, "/", "")
 	decoder := json.NewDecoder(r.Body)
 	var postVals map[string]interface{}
 	err := decoder.Decode(&postVals)
 	idField := h.getPKColumnName(table)
+
+	colTypes, err := h.getTableColumns(table)
+	if err != nil {
+		w.WriteHeader(h.Error.Code)
+		w.Write([]byte(h.Error.Message))
+		fmt.Println(err.Error())
+		return
+	}
+
+	for k := range postVals {
+		if _, ok := colTypes[k]; !ok {
+			delete(postVals, k)
+		}
+	}
+
+	for k, v := range colTypes {
+		if !v.IsNullable {
+			if _, ok := postVals[k]; !ok {
+				switch v.Type {
+				case "int":
+					postVals[k] = new(int64)
+				case "text":
+					postVals[k] = new(string)
+				case "varchar":
+					postVals[k] = new(string)
+				case "float":
+					postVals[k] = new(float64)
+				}
+			}
+		}
+	}
 	delete(postVals, idField)
 
 	var query strings.Builder
@@ -108,10 +139,10 @@ func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(&query2, ", ")
 		}
 	}
+
 	fmt.Fprintf(&query2, ")")
 	resQuery := query.String() + query2.String()
 	fmt.Println(resQuery)
-
 	result, err := h.DB.Exec(resQuery, values...)
 	if err != nil {
 		h.Error.Code = http.StatusInternalServerError
@@ -160,6 +191,11 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for k, v := range postVals {
+		// if _, ok := colTypes[k]; !ok {
+		// 	delete(postVals, k)
+		// 	continue
+		// }
+
 		if v == nil {
 			if !colTypes[k].IsNullable {
 				w.WriteHeader(http.StatusBadRequest)
@@ -198,6 +234,10 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if k == idField {
+			valid = false
+		}
+
 		if !valid {
 			w.WriteHeader(http.StatusBadRequest)
 			e := fmt.Sprintf(`{"error": "field %s have invalid type"}`, k)
@@ -234,14 +274,6 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.DB.Exec(resQuery, values...)
 	if err != nil {
-		me, _ := err.(*mysql.MySQLError)
-		if me.Number == 1062 {
-			w.WriteHeader(http.StatusBadRequest)
-			e := fmt.Sprintf(`"error": "field %s have invalid type"`, idField)
-			w.Write([]byte(e))
-			fmt.Println(err.Error())
-			return
-		}
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`"error": "internal server error"`))
 		fmt.Println(err.Error())
@@ -272,7 +304,40 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
+	path := strings.Split(r.URL.Path, "/")[1:]
+	table := path[0]
+	id := path[1]
+	idField := h.getPKColumnName(table)
 
+	query := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", table, idField)
+	result, err := h.DB.Exec(query, id)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`"error": "internal server error"`))
+		fmt.Println(err.Error())
+		return
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "internal server error"}`))
+		fmt.Println(err.Error())
+		return
+	}
+
+	h.Result = map[string]interface{}{
+		"response": map[string]interface{}{
+			"deleted": affected,
+		},
+	}
+
+	answer, err := json.Marshal(h.Result)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "error marshaling answer"}`))
+	}
+	w.Write(answer)
 }
 
 func (h *Handler) listTables() error {

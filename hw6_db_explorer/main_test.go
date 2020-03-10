@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
-	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -537,7 +537,7 @@ func runCases(t *testing.T, ts *httptest.Server, db *sql.DB, cases []Case) {
 		defer resp.Body.Close()
 		body, err := ioutil.ReadAll(resp.Body)
 
-		// fmt.Printf("[%s] body: %s\n", caseName, string(body))
+		fmt.Printf("[%s] body: %s\n", caseName, string(body))
 		if item.Status == 0 {
 			item.Status = http.StatusOK
 		}
