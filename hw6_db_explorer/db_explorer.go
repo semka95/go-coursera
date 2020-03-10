@@ -87,7 +87,65 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	table := r.URL.Path[1:]
+	postVals := r.PostForm
+	idField := h.getPKColumnName(table)
+	delete(postVals, idField)
 
+	var query strings.Builder
+	var query2 strings.Builder
+	fmt.Fprintf(&query, "INSERT INTO %v (", table)
+	fmt.Fprintf(&query2, ") VALUES (")
+	values := make([]interface{}, 0, len(postVals))
+	for k, v := range postVals {
+		values = append(values, v[0])
+		fmt.Fprintf(&query, "`%s`", k)
+		fmt.Fprintf(&query2, "?")
+		if len(values) != len(postVals) {
+			fmt.Fprintf(&query, ", ")
+			fmt.Fprintf(&query2, ", ")
+		}
+	}
+	fmt.Fprintf(&query2, ")")
+	resQuery := query.String() + query2.String()
+	fmt.Println(resQuery)
+
+	result, err := h.DB.Exec(resQuery, values...)
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		fmt.Println(err.Error())
+	}
+
+	_, err = result.RowsAffected()
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		fmt.Println(err.Error())
+	}
+
+	lastID, err := result.LastInsertId()
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		fmt.Println(err.Error())
+	}
+
+	response := map[string]interface{}{
+		idField: lastID,
+	}
+
+	h.Result = map[string]interface{}{
+		"response": response,
+	}
+
+	answer, err := json.Marshal(h.Result)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "error marshaling answer"}`))
+	}
+	w.Write(answer)
 }
 
 func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
@@ -161,16 +219,15 @@ func (h *Handler) getTableRecords(table, l, o string) error {
 	for rows.Next() {
 		value := make([]interface{}, len(columns))
 		for i := range columns {
-			st := columns[i].DatabaseTypeName()
-			switch st {
+			switch st := columns[i].DatabaseTypeName(); st {
 			case "INT":
-				value[i] = new(int64)
+				value[i] = new(*int64)
 			case "FLOAT":
-				value[i] = new(float64)
+				value[i] = new(*float64)
 			case "VARCHAR":
-				value[i] = new(string)
+				value[i] = new(*string)
 			case "TEXT":
-				value[i] = new(string)
+				value[i] = new(*string)
 			}
 		}
 
@@ -207,14 +264,9 @@ func (h *Handler) getTableRecord(table, id string) error {
 		return err
 	}
 
-	var items []map[string]interface{}
+	idField := h.getPKColumnName(table)
 
-	query := fmt.Sprintf("SELECT `COLUMN_NAME` FROM `information_schema`.`COLUMNS` WHERE (`TABLE_NAME` = '%s') AND (`COLUMN_KEY` = 'PRI')", table)
-	row := h.DB.QueryRow(query)
-	field := new(string)
-	row.Scan(&field)
-
-	query = fmt.Sprintf("SELECT * FROM %s WHERE id = ?", table)
+	query := fmt.Sprintf("SELECT * FROM %s WHERE %s = ?", table, idField)
 	rows, err := h.DB.Query(query, rec)
 	if err != nil {
 		me, _ := err.(*mysql.MySQLError)
@@ -229,43 +281,49 @@ func (h *Handler) getTableRecord(table, id string) error {
 	}
 	columns, _ := rows.ColumnTypes()
 
-	for rows.Next() {
-		value := make([]interface{}, len(columns))
-		for i := range columns {
-			st := columns[i].DatabaseTypeName()
-			switch st {
-			case "INT":
-				value[i] = new(*int64)
-			case "FLOAT":
-				value[i] = new(*float64)
-			case "VARCHAR":
-				value[i] = new(*string)
-			case "TEXT":
-				value[i] = new(*string)
-			}
+	rows.Next()
+	value := make([]interface{}, len(columns))
+	for i := range columns {
+		st := columns[i].DatabaseTypeName()
+		switch st {
+		case "INT":
+			value[i] = new(*int64)
+		case "FLOAT":
+			value[i] = new(*float64)
+		case "VARCHAR":
+			value[i] = new(*string)
+		case "TEXT":
+			value[i] = new(*string)
 		}
+	}
 
-		err = rows.Scan(value...)
-		if err != nil {
-			h.Error.Code = http.StatusInternalServerError
-			h.Error.Message = `{"error": "internal server error"}`
-			return err
-		}
+	err = rows.Scan(value...)
+	if err != nil {
+		h.Error.Code = http.StatusNotFound
+		h.Error.Message = `{"error": "record not found"}`
+		return err
+	}
 
-		item := make(map[string]interface{})
-		for i := range value {
-			item[columns[i].Name()] = value[i]
-		}
-		items = append(items, item)
+	item := make(map[string]interface{})
+	for i := range value {
+		item[columns[i].Name()] = value[i]
 	}
 
 	rows.Close()
 
 	h.Result = map[string]interface{}{
 		"response": map[string]interface{}{
-			"records": items,
+			"record": item,
 		},
 	}
 
 	return nil
+}
+
+func (h *Handler) getPKColumnName(table string) string {
+	query := fmt.Sprintf("SELECT `COLUMN_NAME` FROM `information_schema`.`COLUMNS` WHERE (`TABLE_NAME` = '%s') AND (`COLUMN_KEY` = 'PRI')", table)
+	row := h.DB.QueryRow(query)
+	idField := new(string)
+	row.Scan(&idField)
+	return *idField
 }
