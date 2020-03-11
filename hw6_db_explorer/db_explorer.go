@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -52,8 +53,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			w.WriteHeader(h.Error.Code)
 			w.Write([]byte(h.Error.Message))
-			fmt.Println(err.Error())
-			return
+			log.Println(err.Error())
 		}
 	} else {
 		path := strings.Split(r.URL.Path, "/")[1:]
@@ -62,7 +62,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				w.WriteHeader(h.Error.Code)
 				w.Write([]byte(h.Error.Message))
-				fmt.Println(err.Error())
+				log.Println(err.Error())
 				return
 			}
 		}
@@ -71,33 +71,41 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				w.WriteHeader(h.Error.Code)
 				w.Write([]byte(h.Error.Message))
-				fmt.Println(err.Error())
+				log.Println(err.Error())
 				return
 			}
 		}
-
 	}
 
 	answer, err := json.Marshal(h.Result)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "error marshaling answer"}`))
+		return
 	}
 	w.Write(answer)
 }
 
 func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
 	table := strings.ReplaceAll(r.URL.Path, "/", "")
+
 	decoder := json.NewDecoder(r.Body)
 	var postVals map[string]interface{}
 	err := decoder.Decode(&postVals)
-	idField := h.getPKColumnName(table)
+
+	idField, err := h.getPKColumnName(table)
+	if err != nil {
+		w.WriteHeader(h.Error.Code)
+		w.Write([]byte(h.Error.Message))
+		log.Println(err.Error())
+		return
+	}
 
 	colTypes, err := h.getTableColumns(table)
 	if err != nil {
 		w.WriteHeader(h.Error.Code)
 		w.Write([]byte(h.Error.Message))
-		fmt.Println(err.Error())
+		log.Println(err.Error())
 		return
 	}
 
@@ -113,9 +121,7 @@ func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
 				switch v.Type {
 				case "int":
 					postVals[k] = new(int64)
-				case "text":
-					postVals[k] = new(string)
-				case "varchar":
+				case "string":
 					postVals[k] = new(string)
 				case "float":
 					postVals[k] = new(float64)
@@ -125,36 +131,34 @@ func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(postVals, idField)
 
-	var query strings.Builder
-	var query2 strings.Builder
-	fmt.Fprintf(&query, "INSERT INTO %v (", table)
-	fmt.Fprintf(&query2, ") VALUES (")
+	var fields strings.Builder
+	var placeholders strings.Builder
 	values := make([]interface{}, 0, len(postVals))
 	for k, v := range postVals {
 		values = append(values, v)
-		fmt.Fprintf(&query, "`%s`", k)
-		fmt.Fprintf(&query2, "?")
+		fmt.Fprintf(&fields, "`%s`", k)
+		fmt.Fprintf(&placeholders, "?")
 		if len(values) != len(postVals) {
-			fmt.Fprintf(&query, ", ")
-			fmt.Fprintf(&query2, ", ")
+			fmt.Fprintf(&fields, ", ")
+			fmt.Fprintf(&placeholders, ", ")
 		}
 	}
 
-	fmt.Fprintf(&query2, ")")
-	resQuery := query.String() + query2.String()
-	fmt.Println(resQuery)
+	resQuery := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", table, fields.String(), placeholders.String())
 	result, err := h.DB.Exec(resQuery, values...)
 	if err != nil {
-		h.Error.Code = http.StatusInternalServerError
-		h.Error.Message = `{"error": "internal server error"}`
-		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "internal server error"}`))
+		log.Println(err.Error())
+		return
 	}
 
 	lastID, err := result.LastInsertId()
 	if err != nil {
-		h.Error.Code = http.StatusInternalServerError
-		h.Error.Message = `{"error": "internal server error"}`
-		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "internal server error"}`))
+		log.Println(err.Error())
+		return
 	}
 
 	h.Result = map[string]interface{}{
@@ -167,6 +171,8 @@ func (h *Handler) handlePut(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "error marshaling answer"}`))
+		log.Println(err.Error())
+		return
 	}
 	w.Write(answer)
 }
@@ -175,32 +181,39 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	path := strings.Split(r.URL.Path, "/")[1:]
 	table := path[0]
 	id := path[1]
-	idField := h.getPKColumnName(table)
+	idField, err := h.getPKColumnName(table)
+	if err != nil {
+		w.WriteHeader(h.Error.Code)
+		w.Write([]byte(h.Error.Message))
+		log.Println(err.Error())
+		return
+	}
 
 	decoder := json.NewDecoder(r.Body)
 	decoder.UseNumber()
 	var postVals map[string]interface{}
-	err := decoder.Decode(&postVals)
+	err = decoder.Decode(&postVals)
 
 	colTypes, err := h.getTableColumns(table)
 	if err != nil {
 		w.WriteHeader(h.Error.Code)
 		w.Write([]byte(h.Error.Message))
-		fmt.Println(err.Error())
+		log.Println(err.Error())
 		return
 	}
 
 	for k, v := range postVals {
-		// if _, ok := colTypes[k]; !ok {
-		// 	delete(postVals, k)
-		// 	continue
-		// }
+		if _, ok := colTypes[k]; !ok {
+			delete(postVals, k)
+			continue
+		}
 
 		if v == nil {
 			if !colTypes[k].IsNullable {
 				w.WriteHeader(http.StatusBadRequest)
 				e := fmt.Sprintf(`{"error": "field %s have invalid type"}`, k)
 				w.Write([]byte(e))
+				log.Printf("tried to assign null value to not nullable field %s\n", k)
 				return
 			}
 		}
@@ -216,7 +229,7 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if colTypes[k].Type == "text" || colTypes[k].Type == "varchar" {
+		if colTypes[k].Type == "string" {
 			if _, ok := v.(json.Number); ok {
 				valid = false
 			} else {
@@ -242,41 +255,29 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			e := fmt.Sprintf(`{"error": "field %s have invalid type"}`, k)
 			w.Write([]byte(e))
+			log.Printf("field %s have invalid type", k)
 			return
 		}
-
 	}
 
 	var query strings.Builder
-	fmt.Fprintf(&query, "UPDATE %v SET ", table)
 	values := make([]interface{}, 0, len(postVals))
-	i := 0
 	for k, v := range postVals {
-		if v == nil {
-			i++
-			fmt.Fprintf(&query, "`%s` = NULL", k)
-			if i != len(postVals) {
-				fmt.Fprintf(&query, ", ")
-			}
-			continue
-		}
 		values = append(values, v)
-		i++
 		fmt.Fprintf(&query, "`%s` = ?", k)
-		if i != len(postVals) {
+		if len(values) != len(postVals) {
 			fmt.Fprintf(&query, ", ")
 		}
 	}
 
-	fmt.Fprintf(&query, " WHERE %s = ?", idField)
-	resQuery := query.String()
+	resQuery := fmt.Sprintf("UPDATE %s SET %s WHERE %s = ?", table, query.String(), idField)
 	values = append(values, id)
 
 	result, err := h.DB.Exec(resQuery, values...)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`"error": "internal server error"`))
-		fmt.Println(err.Error())
+		log.Println(err.Error())
 		return
 	}
 
@@ -284,7 +285,7 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "internal server error"}`))
-		fmt.Println(err.Error())
+		log.Println(err.Error())
 		return
 	}
 
@@ -298,23 +299,31 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "error marshaling answer"}`))
+		log.Println(err.Error())
+		return
 	}
 	w.Write(answer)
-
 }
 
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	path := strings.Split(r.URL.Path, "/")[1:]
 	table := path[0]
 	id := path[1]
-	idField := h.getPKColumnName(table)
+
+	idField, err := h.getPKColumnName(table)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`"error": "internal server error"`))
+		log.Println(err.Error())
+		return
+	}
 
 	query := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", table, idField)
 	result, err := h.DB.Exec(query, id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`"error": "internal server error"`))
-		fmt.Println(err.Error())
+		log.Println(err.Error())
 		return
 	}
 
@@ -322,7 +331,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "internal server error"}`))
-		fmt.Println(err.Error())
+		log.Println(err.Error())
 		return
 	}
 
@@ -336,6 +345,8 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "error marshaling answer"}`))
+		log.Println(err.Error())
+		return
 	}
 	w.Write(answer)
 }
@@ -351,7 +362,7 @@ func (h *Handler) listTables() error {
 	}
 
 	for rows.Next() {
-		table := ""
+		var table string
 		err = rows.Scan(&table)
 		if err != nil {
 			h.Error.Code = http.StatusInternalServerError
@@ -361,7 +372,18 @@ func (h *Handler) listTables() error {
 		items = append(items, table)
 	}
 
-	rows.Close()
+	if err = rows.Err(); err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return err
+	}
+
+	err = rows.Close()
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return err
+	}
 
 	tables := map[string][]string{"tables": items}
 
@@ -374,12 +396,12 @@ func (h *Handler) listTables() error {
 
 func (h *Handler) getTableRecords(table, l, o string) error {
 	limit, err := strconv.Atoi(l)
-	if err != nil {
+	if err != nil || limit <= 0 {
 		limit = 5
 	}
 
 	offset, err := strconv.Atoi(o)
-	if err != nil {
+	if err != nil || offset < 0 {
 		offset = 0
 	}
 
@@ -401,20 +423,7 @@ func (h *Handler) getTableRecords(table, l, o string) error {
 	columns, _ := rows.ColumnTypes()
 
 	for rows.Next() {
-		value := make([]interface{}, len(columns))
-		for i := range columns {
-			switch st := columns[i].DatabaseTypeName(); st {
-			case "INT":
-				value[i] = new(*int64)
-			case "FLOAT":
-				value[i] = new(*float64)
-			case "VARCHAR":
-				value[i] = new(*string)
-			case "TEXT":
-				value[i] = new(*string)
-			}
-		}
-
+		value := prepareScanValue(columns)
 		err = rows.Scan(value...)
 		if err != nil {
 			h.Error.Code = http.StatusInternalServerError
@@ -429,7 +438,18 @@ func (h *Handler) getTableRecords(table, l, o string) error {
 		items = append(items, item)
 	}
 
-	rows.Close()
+	if err = rows.Err(); err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return err
+	}
+
+	err = rows.Close()
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return err
+	}
 
 	h.Result = map[string]interface{}{
 		"response": map[string]interface{}{
@@ -448,7 +468,12 @@ func (h *Handler) getTableRecord(table, id string) error {
 		return err
 	}
 
-	idField := h.getPKColumnName(table)
+	idField, err := h.getPKColumnName(table)
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return err
+	}
 
 	query := fmt.Sprintf("SELECT * FROM %s WHERE %s = ?", table, idField)
 	rows, err := h.DB.Query(query, rec)
@@ -466,21 +491,7 @@ func (h *Handler) getTableRecord(table, id string) error {
 	columns, _ := rows.ColumnTypes()
 
 	rows.Next()
-	value := make([]interface{}, len(columns))
-	for i := range columns {
-		st := columns[i].DatabaseTypeName()
-		switch st {
-		case "INT":
-			value[i] = new(*int64)
-		case "FLOAT":
-			value[i] = new(*float64)
-		case "VARCHAR":
-			value[i] = new(*string)
-		case "TEXT":
-			value[i] = new(*string)
-		}
-	}
-
+	value := prepareScanValue(columns)
 	err = rows.Scan(value...)
 	if err != nil {
 		h.Error.Code = http.StatusNotFound
@@ -493,7 +504,18 @@ func (h *Handler) getTableRecord(table, id string) error {
 		item[columns[i].Name()] = value[i]
 	}
 
-	rows.Close()
+	if err = rows.Err(); err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return err
+	}
+
+	err = rows.Close()
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return err
+	}
 
 	h.Result = map[string]interface{}{
 		"response": map[string]interface{}{
@@ -504,12 +526,17 @@ func (h *Handler) getTableRecord(table, id string) error {
 	return nil
 }
 
-func (h *Handler) getPKColumnName(table string) string {
+func (h *Handler) getPKColumnName(table string) (string, error) {
 	query := fmt.Sprintf("SELECT `COLUMN_NAME` FROM `information_schema`.`COLUMNS` WHERE (`TABLE_NAME` = '%s') AND (`COLUMN_KEY` = 'PRI')", table)
 	row := h.DB.QueryRow(query)
 	idField := new(string)
-	row.Scan(&idField)
-	return *idField
+	err := row.Scan(&idField)
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return "", err
+	}
+	return *idField, nil
 }
 
 type column struct {
@@ -517,11 +544,11 @@ type column struct {
 	IsNullable bool
 }
 
-func (h *Handler) getTableColumns(table string) (map[string]column, error) {
-	str1 := ""
-	str2 := ""
-	isNullstr := ""
-	result := make(map[string]column)
+type columnsInfo map[string]column
+
+func (h *Handler) getTableColumns(table string) (columnsInfo, error) {
+	var colName, colType, isNulls string
+	result := make(columnsInfo)
 
 	query := fmt.Sprintf("SELECT `COLUMN_NAME`, `DATA_TYPE`, `IS_NULLABLE` FROM `information_schema`.`COLUMNS` WHERE (`TABLE_NAME` = '%s');", table)
 
@@ -533,23 +560,53 @@ func (h *Handler) getTableColumns(table string) (map[string]column, error) {
 	}
 
 	for rows.Next() {
-		err = rows.Scan(&str1, &str2, &isNullstr)
+		err = rows.Scan(&colName, &colType, &isNulls)
 		if err != nil {
 			h.Error.Code = http.StatusInternalServerError
 			h.Error.Message = `{"error": "internal server error"}`
 			return nil, err
 		}
 
-		var isNull bool
-		if isNullstr == "NO" {
+		isNull := true
+		if isNulls == "NO" {
 			isNull = false
-		} else {
-			isNull = true
 		}
 
-		result[str1] = column{Type: str2, IsNullable: isNull}
+		if colType == "text" || colType == "varchar" {
+			colType = "string"
+		}
+
+		result[colName] = column{Type: colType, IsNullable: isNull}
 	}
 
-	rows.Close()
+	if err = rows.Err(); err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return nil, err
+	}
+
+	err = rows.Close()
+	if err != nil {
+		h.Error.Code = http.StatusInternalServerError
+		h.Error.Message = `{"error": "internal server error"}`
+		return nil, err
+	}
 	return result, nil
+}
+
+func prepareScanValue(columns []*sql.ColumnType) []interface{} {
+	value := make([]interface{}, len(columns))
+	for i := range columns {
+		switch columns[i].DatabaseTypeName() {
+		case "INT":
+			value[i] = new(*int64)
+		case "FLOAT":
+			value[i] = new(*float64)
+		case "VARCHAR":
+			value[i] = new(*string)
+		case "TEXT":
+			value[i] = new(*string)
+		}
+	}
+	return value
 }
