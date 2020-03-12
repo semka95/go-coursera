@@ -1,7 +1,7 @@
 package main
 
 import (
-	"coursera/microservices/grpc/session"
+	"coursera_grpc2/session"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -36,7 +36,7 @@ func (sm *SessionManager) Create(ctx context.Context, in *session.Session) (*ses
 	trailer := metadata.Pairs("trailer-key", "3.14")
 	grpc.SetTrailer(ctx, trailer)
 
-	id := &session.SessionID{RandStringRunes(sessKeyLen)}
+	id := &session.SessionID{ID: RandStringRunes(sessKeyLen)}
 	sm.mu.Lock()
 	sm.sessions[*id] = in
 	sm.mu.Unlock()

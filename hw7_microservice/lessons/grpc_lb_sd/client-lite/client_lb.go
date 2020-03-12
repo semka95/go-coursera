@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/naming"
 
-	"coursera/microservices/grpc/session"
+	"consul_grpc/session"
 
 	consulapi "github.com/hashicorp/consul/api"
 )

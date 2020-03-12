@@ -1,10 +1,11 @@
 package main
 
 import (
-	"coursera/microservices/grpc/session"
 	"fmt"
 	"log"
 	"net"
+
+	"coursera_grpc/session"
 
 	"google.golang.org/grpc"
 )

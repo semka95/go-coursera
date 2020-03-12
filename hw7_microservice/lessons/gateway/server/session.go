@@ -2,7 +2,7 @@ package main
 
 import (
 	// "../session"
-	"coursera/microservices/gateway/session"
+	"gateway_grpc/session"
 
 	"fmt"
 	"math/rand"
@@ -30,7 +30,7 @@ func NewSessionManager() *SessionManager {
 
 func (sm *SessionManager) Create(ctx context.Context, in *session.Session) (*session.SessionID, error) {
 	fmt.Println("call Create", in)
-	id := &session.SessionID{RandStringRunes(sessKeyLen)}
+	id := &session.SessionID{ID: RandStringRunes(sessKeyLen)}
 	sm.mu.Lock()
 	sm.sessions[*id] = in
 	sm.mu.Unlock()

@@ -1,10 +1,11 @@
 package main
 
 import (
-	"coursera/microservices/grpc/session"
 	"fmt"
 	"math/rand"
 	"sync"
+
+	"coursera_grpc/session"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -21,14 +22,16 @@ type SessionManager struct {
 
 func NewSessionManager() *SessionManager {
 	return &SessionManager{
-		mu:       sync.RWMutex{},
+		mu: sync.RWMutex{},
+		// this will not work with new grpc. Now it generates new fields, one of them
+		// has []byte type, so session.SessionID struct can't be map key.
 		sessions: map[session.SessionID]*session.Session{},
 	}
 }
 
 func (sm *SessionManager) Create(ctx context.Context, in *session.Session) (*session.SessionID, error) {
 	fmt.Println("call Create", in)
-	id := &session.SessionID{RandStringRunes(sessKeyLen)}
+	id := &session.SessionID{ID: RandStringRunes(sessKeyLen)}
 	sm.mu.Lock()
 	sm.sessions[*id] = in
 	sm.mu.Unlock()

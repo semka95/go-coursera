@@ -7,9 +7,9 @@ import (
 	"github.com/go-openapi/strfmt"
 
 	// "../sess-client/client"
-	apiClient "coursera/microservices/swagger/sess-client/client"
-	auth "coursera/microservices/swagger/sess-client/client/auth_checker"
-	models "coursera/microservices/swagger/sess-client/models"
+	apiClient "swagger_grpc/sess-client/client"
+	auth "swagger_grpc/sess-client/client/auth_checker"
+	models "swagger_grpc/sess-client/models"
 )
 
 func main() {

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"coursera/microservices/grpc_stream/translit"
 	"fmt"
+	"grpc_stream/translit"
 	"io"
 
 	tr "github.com/gen1us2k/go-translit"

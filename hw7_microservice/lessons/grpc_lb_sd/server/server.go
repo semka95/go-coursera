@@ -1,7 +1,7 @@
 package main
 
 import (
-	"coursera/microservices/grpc/session"
+	"consul_grpc/session"
 	"flag"
 	"fmt"
 	"log"

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"coursera/microservices/grpc/session"
+	"coursera_grpc2/session"
 	"fmt"
 	"log"
 	"net"
