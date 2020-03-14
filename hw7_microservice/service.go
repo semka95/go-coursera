@@ -4,17 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/tap"
+	"google.golang.org/grpc/status"
 	"net"
+	"strings"
 
 	"google.golang.org/grpc"
 )
 
 type BizManager struct {
+	ACL map[string][]string
 }
 
 type AdminManager struct {
+	ACL map[string][]string
 }
 
 func (srv *BizManager) Check(ctx context.Context, in *Nothing) (*Nothing, error) {
@@ -48,11 +52,11 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 	}
 
 	server := grpc.NewServer(
-		grpc.InTapHandle(statistics),
-		grpc.UnaryInterceptor(aclChecker),
+		grpc.UnaryInterceptor(aclInterceptor),
+		grpc.StreamInterceptor(streamACLInterceptor),
 	)
-	RegisterBizServer(server, &BizManager{})
-	RegisterAdminServer(server, &AdminManager{})
+	RegisterBizServer(server, &BizManager{ACL: acl})
+	RegisterAdminServer(server, &AdminManager{ACL: acl})
 	fmt.Println("starting server at ", listenAddr)
 
 	// TODO: needs err handling https://www.atatus.com/blog/goroutines-error-handling/
@@ -69,18 +73,72 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 	return nil
 }
 
-func statistics(ctx context.Context, info *tap.Info) (context.Context, error) {
-	return ctx, nil
-}
-
-func aclChecker(
+func aclInterceptor(
 	ctx context.Context,
 	req interface{},
 	info *grpc.UnaryServerInfo,
 	handler grpc.UnaryHandler,
 ) (interface{}, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
-	fmt.Println(md)
+	c := md.Get("consumer")
+	if c == nil {
+		return nil, status.Errorf(codes.Unauthenticated, "empty consumer")
+	}
+
+	consumer := c[0]
+	method := info.FullMethod
+	acl := info.Server.(*BizManager).ACL
+
+	valid := validate(acl, consumer, method)
+
+	if !valid {
+		return nil, status.Errorf(codes.Unauthenticated, "method %s for consumer %s is not allowed", method, consumer)
+	}
+
 	reply, err := handler(ctx, req)
 	return reply, err
+}
+
+func streamACLInterceptor(
+	srv interface{},
+	ss grpc.ServerStream,
+	info *grpc.StreamServerInfo,
+	handler grpc.StreamHandler,
+) error {
+	md, _ := metadata.FromIncomingContext(ss.Context())
+	c := md.Get("consumer")
+	if c == nil {
+		return status.Errorf(codes.Unauthenticated, "empty consumer")
+	}
+
+	consumer := c[0]
+	method := info.FullMethod
+	acl := srv.(*AdminManager).ACL
+
+	valid := validate(acl, consumer, method)
+
+	if !valid {
+		return status.Errorf(codes.Unauthenticated, "method %s for consumer %s is not allowed", method, consumer)
+	}
+
+	err := handler(srv, ss)
+
+	return err
+}
+
+func validate(acl map[string][]string, consumer string, method string) bool {
+	valid := false
+	methodSplit := strings.Split(method, "/")
+	for _, v := range acl[consumer] {
+		if v == method {
+			valid = true
+			continue
+		}
+		if strings.Contains(v, methodSplit[1]) {
+			if strings.HasSuffix(v, "*") || strings.HasSuffix(v, methodSplit[2]) {
+				valid = true
+			}
+		}
+	}
+	return valid
 }
