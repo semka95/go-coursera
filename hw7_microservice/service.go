@@ -26,12 +26,12 @@ type AdminManager struct {
 }
 
 type Storage struct {
-	ACL  map[string][]string
-	Logs chan *Event
-	//Stats    chan *Stat
-	LogSubs map[chan *Event]struct{}
-	//StatSubs map[chan *Event]struct{}
-	mutex *sync.RWMutex
+	ACL      map[string][]string
+	Logs     chan *Event
+	Stats    chan *Event
+	LogSubs  map[chan *Event]struct{}
+	StatSubs map[chan *Event]struct{}
+	mutex    *sync.RWMutex
 }
 
 func (srv *BizManager) Check(ctx context.Context, in *Nothing) (*Nothing, error) {
@@ -52,7 +52,7 @@ func (srv *AdminManager) Logging(in *Nothing, server Admin_LoggingServer) error 
 			break
 		}
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("log send error: ", err.Error())
 			break
 		}
 	}
@@ -68,7 +68,55 @@ func (srv *AdminManager) newLogSub() chan *Event {
 }
 
 func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsServer) error {
+	ticker := time.NewTicker(time.Second * time.Duration(in.IntervalSeconds))
+	defer ticker.Stop()
+	st := &Stat{
+		Timestamp:  time.Now().Unix(),
+		ByMethod:   make(map[string]uint64),
+		ByConsumer: make(map[string]uint64),
+	}
+	ch := srv.newLogSub()
+
+	for {
+		select {
+		case <-ticker.C:
+			err := server.Send(st)
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				fmt.Println("stat send error: ", err.Error())
+				return nil
+			}
+			st.ByMethod = make(map[string]uint64)
+			st.ByConsumer = make(map[string]uint64)
+			st.Timestamp = time.Now().Unix()
+		case v := <-ch:
+			if _, ok := st.ByMethod[v.Method]; ok {
+				st.ByMethod[v.Method]++
+			} else {
+				st.ByMethod[v.Method] = 1
+			}
+			if _, ok := st.ByConsumer[v.Consumer]; ok {
+				st.ByConsumer[v.Consumer]++
+			} else {
+				st.ByConsumer[v.Consumer] = 1
+			}
+
+		case <-server.Context().Done():
+			return nil
+		}
+	}
+
 	return nil
+}
+
+func (srv *AdminManager) newStatSub() chan *Event {
+	ch := make(chan *Event, 2)
+	srv.mutex.Lock()
+	srv.StatSubs[ch] = struct{}{}
+	srv.mutex.Unlock()
+	return ch
 }
 
 func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error {
@@ -91,6 +139,7 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 	store := &Storage{
 		ACL:     acl,
 		Logs:    make(chan *Event, 2),
+		Stats:   make(chan *Event, 2),
 		mutex:   &sync.RWMutex{},
 		LogSubs: make(map[chan *Event]struct{}),
 	}
@@ -109,6 +158,11 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 				c <- val
 			}
 			store.mutex.RUnlock()
+			store.mutex.RLock()
+			for c := range store.StatSubs {
+				c <- val
+			}
+			store.mutex.RUnlock()
 		}
 		store.mutex.Lock()
 		for ch := range store.LogSubs {
@@ -122,7 +176,7 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 	go func() {
 		<-ctx.Done()
 		close(store.Logs)
-		//close(store.Stats)
+		close(store.Stats)
 		server.Stop()
 		lis.Close()
 	}()
