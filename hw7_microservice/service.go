@@ -31,8 +31,7 @@ type Storage struct {
 	//Stats    chan *Stat
 	LogSubs map[chan *Event]struct{}
 	//StatSubs map[chan *Event]struct{}
-	mutex    sync.Mutex
-	capacity int
+	mutex *sync.RWMutex
 }
 
 func (srv *BizManager) Check(ctx context.Context, in *Nothing) (*Nothing, error) {
@@ -46,29 +45,26 @@ func (srv *BizManager) Test(ctx context.Context, in *Nothing) (*Nothing, error) 
 }
 
 func (srv *AdminManager) Logging(in *Nothing, server Admin_LoggingServer) error {
-	ch := make(chan *Event, 1)
+	ch := srv.newLogSub()
+	for c := range ch {
+		err := server.Send(c)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+	}
+	return nil
+}
+
+func (srv *AdminManager) newLogSub() chan *Event {
+	ch := make(chan *Event, 2)
 	srv.mutex.Lock()
 	srv.LogSubs[ch] = struct{}{}
 	srv.mutex.Unlock()
-
-	go func() {
-		for c := range ch {
-			err := server.Send(c)
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				fmt.Println(err)
-				break
-			}
-		}
-		//close(ch)
-		//srv.mutex.Lock()
-		//delete(srv.LogSubs, ch)
-		//srv.mutex.Unlock()
-		//return
-	}()
-	return nil
+	return ch
 }
 
 func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsServer) error {
@@ -76,13 +72,13 @@ func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsSer
 }
 
 func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error {
-	lis, err := net.Listen("tcp", listenAddr)
+	var acl map[string][]string
+	err := json.Unmarshal([]byte(ACLData), &acl)
 	if err != nil {
 		return err
 	}
 
-	var acl map[string][]string
-	err = json.Unmarshal([]byte(ACLData), &acl)
+	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return err
 	}
@@ -93,36 +89,34 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 	)
 
 	store := &Storage{
-		ACL:      acl,
-		Logs:     make(chan *Event, 20),
-		capacity: 1,
-		mutex:    sync.Mutex{},
-		LogSubs:  make(map[chan *Event]struct{}),
+		ACL:     acl,
+		Logs:    make(chan *Event, 2),
+		mutex:   &sync.RWMutex{},
+		LogSubs: make(map[chan *Event]struct{}),
 	}
-	go func() {
-		for val := range store.Logs {
-			store.mutex.Lock()
-			for c := range store.LogSubs {
-				c <- val
-			}
-			store.mutex.Unlock()
-		}
-		store.mutex.Lock()
-		for c := range store.LogSubs {
-			close(c)
-			delete(store.LogSubs, c)
-		}
-		store.LogSubs = nil
-		store.mutex.Unlock()
 
-	}()
 	RegisterBizServer(server, &BizManager{store})
 	RegisterAdminServer(server, &AdminManager{store})
 	fmt.Println("starting server at ", listenAddr)
 
 	// TODO: needs err handling https://www.atatus.com/blog/goroutines-error-handling/
+	go server.Serve(lis)
+
 	go func() {
-		server.Serve(lis)
+		for val := range store.Logs {
+			store.mutex.RLock()
+			for c := range store.LogSubs {
+				c <- val
+			}
+			store.mutex.RUnlock()
+		}
+		store.mutex.Lock()
+		for ch := range store.LogSubs {
+			close(ch)
+			delete(store.LogSubs, ch)
+		}
+		store.LogSubs = nil
+		store.mutex.Unlock()
 	}()
 
 	go func() {
@@ -160,10 +154,7 @@ func aclInterceptor(
 	}
 
 	manager.Logs <- &Event{Timestamp: time.Now().Unix(), Consumer: consumer, Method: method, Host: p.Addr.String()}
-
-	reply, err := handler(ctx, req)
-
-	return reply, err
+	return handler(ctx, req)
 }
 
 func streamACLInterceptor(
@@ -190,10 +181,7 @@ func streamACLInterceptor(
 	}
 
 	manager.Logs <- &Event{Timestamp: time.Now().Unix(), Consumer: consumer, Method: method, Host: p.Addr.String()}
-	// handle err
-	err := handler(srv, ss)
-
-	return err
+	return handler(srv, ss)
 }
 
 func validate(acl map[string][]string, consumer string, method string) bool {
