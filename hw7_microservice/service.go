@@ -26,12 +26,10 @@ type AdminManager struct {
 }
 
 type Storage struct {
-	ACL      map[string][]string
-	Logs     chan *Event
-	Stats    chan *Event
-	LogSubs  map[chan *Event]struct{}
-	StatSubs map[chan *Event]struct{}
-	mutex    *sync.RWMutex
+	ACL       map[string][]string
+	Events    chan *Event
+	EventSubs map[chan *Event]struct{}
+	mutex     *sync.RWMutex
 }
 
 func (srv *BizManager) Check(ctx context.Context, in *Nothing) (*Nothing, error) {
@@ -45,7 +43,7 @@ func (srv *BizManager) Test(ctx context.Context, in *Nothing) (*Nothing, error) 
 }
 
 func (srv *AdminManager) Logging(in *Nothing, server Admin_LoggingServer) error {
-	ch := srv.newLogSub()
+	ch := srv.newSub()
 	for c := range ch {
 		err := server.Send(c)
 		if err == io.EOF {
@@ -59,10 +57,10 @@ func (srv *AdminManager) Logging(in *Nothing, server Admin_LoggingServer) error 
 	return nil
 }
 
-func (srv *AdminManager) newLogSub() chan *Event {
-	ch := make(chan *Event, 2)
+func (srv *AdminManager) newSub() chan *Event {
+	ch := make(chan *Event, 1)
 	srv.mutex.Lock()
-	srv.LogSubs[ch] = struct{}{}
+	srv.EventSubs[ch] = struct{}{}
 	srv.mutex.Unlock()
 	return ch
 }
@@ -70,17 +68,17 @@ func (srv *AdminManager) newLogSub() chan *Event {
 func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsServer) error {
 	ticker := time.NewTicker(time.Second * time.Duration(in.IntervalSeconds))
 	defer ticker.Stop()
-	st := &Stat{
+	st := Stat{
 		Timestamp:  time.Now().Unix(),
 		ByMethod:   make(map[string]uint64),
 		ByConsumer: make(map[string]uint64),
 	}
-	ch := srv.newLogSub()
+	ch := srv.newSub()
 
 	for {
 		select {
 		case <-ticker.C:
-			err := server.Send(st)
+			err := server.Send(&st)
 			if err == io.EOF {
 				return nil
 			}
@@ -92,6 +90,9 @@ func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsSer
 			st.ByConsumer = make(map[string]uint64)
 			st.Timestamp = time.Now().Unix()
 		case v := <-ch:
+			if v == nil {
+				return nil
+			}
 			if _, ok := st.ByMethod[v.Method]; ok {
 				st.ByMethod[v.Method]++
 			} else {
@@ -107,16 +108,7 @@ func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsSer
 			return nil
 		}
 	}
-
 	return nil
-}
-
-func (srv *AdminManager) newStatSub() chan *Event {
-	ch := make(chan *Event, 2)
-	srv.mutex.Lock()
-	srv.StatSubs[ch] = struct{}{}
-	srv.mutex.Unlock()
-	return ch
 }
 
 func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error {
@@ -132,16 +124,15 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 	}
 
 	server := grpc.NewServer(
-		grpc.UnaryInterceptor(aclInterceptor),
-		grpc.StreamInterceptor(streamACLInterceptor),
+		grpc.UnaryInterceptor(unaryInterceptor),
+		grpc.StreamInterceptor(streamInterceptor),
 	)
 
 	store := &Storage{
-		ACL:     acl,
-		Logs:    make(chan *Event, 2),
-		Stats:   make(chan *Event, 2),
-		mutex:   &sync.RWMutex{},
-		LogSubs: make(map[chan *Event]struct{}),
+		ACL:       acl,
+		Events:    make(chan *Event, 1),
+		mutex:     &sync.RWMutex{},
+		EventSubs: make(map[chan *Event]struct{}),
 	}
 
 	RegisterBizServer(server, &BizManager{store})
@@ -152,31 +143,25 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 	go server.Serve(lis)
 
 	go func() {
-		for val := range store.Logs {
+		for val := range store.Events {
 			store.mutex.RLock()
-			for c := range store.LogSubs {
-				c <- val
-			}
-			store.mutex.RUnlock()
-			store.mutex.RLock()
-			for c := range store.StatSubs {
+			for c := range store.EventSubs {
 				c <- val
 			}
 			store.mutex.RUnlock()
 		}
 		store.mutex.Lock()
-		for ch := range store.LogSubs {
+		for ch := range store.EventSubs {
 			close(ch)
-			delete(store.LogSubs, ch)
+			delete(store.EventSubs, ch)
 		}
-		store.LogSubs = nil
+		store.EventSubs = nil
 		store.mutex.Unlock()
 	}()
 
 	go func() {
 		<-ctx.Done()
-		close(store.Logs)
-		close(store.Stats)
+		close(store.Events)
 		server.Stop()
 		lis.Close()
 	}()
@@ -184,7 +169,7 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 	return nil
 }
 
-func aclInterceptor(
+func unaryInterceptor(
 	ctx context.Context,
 	req interface{},
 	info *grpc.UnaryServerInfo,
@@ -202,16 +187,16 @@ func aclInterceptor(
 	manager := info.Server.(*BizManager)
 
 	valid := validate(manager.ACL, consumer, method)
-
 	if !valid {
 		return nil, status.Errorf(codes.Unauthenticated, "method %s for consumer %s is not allowed", method, consumer)
 	}
 
-	manager.Logs <- &Event{Timestamp: time.Now().Unix(), Consumer: consumer, Method: method, Host: p.Addr.String()}
+	manager.Events <- &Event{Timestamp: time.Now().Unix(), Consumer: consumer, Method: method, Host: p.Addr.String()}
+
 	return handler(ctx, req)
 }
 
-func streamACLInterceptor(
+func streamInterceptor(
 	srv interface{},
 	ss grpc.ServerStream,
 	info *grpc.StreamServerInfo,
@@ -229,12 +214,12 @@ func streamACLInterceptor(
 	manager := srv.(*AdminManager)
 
 	valid := validate(manager.ACL, consumer, method)
-
 	if !valid {
 		return status.Errorf(codes.Unauthenticated, "method %s for consumer %s is not allowed", method, consumer)
 	}
 
-	manager.Logs <- &Event{Timestamp: time.Now().Unix(), Consumer: consumer, Method: method, Host: p.Addr.String()}
+	manager.Events <- &Event{Timestamp: time.Now().Unix(), Consumer: consumer, Method: method, Host: p.Addr.String()}
+
 	return handler(srv, ss)
 }
 
