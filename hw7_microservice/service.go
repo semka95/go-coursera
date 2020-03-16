@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"io"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -29,7 +29,7 @@ type AdminManager struct {
 type Storage struct {
 	ACL       map[string][]string
 	Events    chan *Event
-	EventSubs []chan *Event
+	EventSubs map[int]chan *Event
 	mutex     *sync.RWMutex
 }
 
@@ -46,9 +46,10 @@ func (srv *BizManager) Test(ctx context.Context, in *Nothing) (*Nothing, error) 
 func (srv *AdminManager) Logging(in *Nothing, server Admin_LoggingServer) error {
 	md, _ := metadata.FromIncomingContext(server.Context())
 	id, _ := strconv.Atoi(md.Get("subID")[0])
-	srv.mutex.Lock()
+	srv.mutex.RLock()
 	ch := srv.EventSubs[id]
-	srv.mutex.Unlock()
+	srv.mutex.RUnlock()
+
 	for c := range ch {
 		err := server.Send(c)
 		if err == io.EOF {
@@ -64,16 +65,18 @@ func (srv *AdminManager) Logging(in *Nothing, server Admin_LoggingServer) error 
 func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsServer) error {
 	ticker := time.NewTicker(time.Second * time.Duration(in.IntervalSeconds))
 	defer ticker.Stop()
+
 	st := Stat{
 		Timestamp:  time.Now().Unix(),
 		ByMethod:   make(map[string]uint64),
 		ByConsumer: make(map[string]uint64),
 	}
+
 	md, _ := metadata.FromIncomingContext(server.Context())
 	id, _ := strconv.Atoi(md.Get("subID")[0])
-	srv.mutex.Lock()
+	srv.mutex.RLock()
 	ch := srv.EventSubs[id]
-	srv.mutex.Unlock()
+	srv.mutex.RUnlock()
 
 	for {
 		select {
@@ -83,7 +86,7 @@ func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsSer
 				return nil
 			}
 			if err != nil {
-				return nil
+				return err
 			}
 			st.ByMethod = make(map[string]uint64)
 			st.ByConsumer = make(map[string]uint64)
@@ -129,14 +132,14 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 
 	store := &Storage{
 		ACL:       acl,
-		Events:    make(chan *Event, 100),
+		Events:    make(chan *Event, 10),
 		mutex:     &sync.RWMutex{},
-		EventSubs: []chan *Event{},
+		EventSubs: make(map[int]chan *Event),
 	}
 
 	RegisterBizServer(server, &BizManager{store})
 	RegisterAdminServer(server, &AdminManager{store})
-	fmt.Println("starting server at ", listenAddr)
+	log.Println("starting server at ", listenAddr)
 
 	go server.Serve(lis)
 
@@ -173,13 +176,14 @@ func unaryInterceptor(
 	handler grpc.UnaryHandler,
 ) (interface{}, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
-	c := md.Get("consumer")
 	p, _ := peer.FromContext(ctx)
+
+	c := md.Get("consumer")
 	if c == nil {
 		return nil, status.Errorf(codes.Unauthenticated, "empty consumer")
 	}
-
 	consumer := c[0]
+
 	method := info.FullMethod
 	manager := info.Server.(*BizManager)
 
@@ -193,16 +197,14 @@ func unaryInterceptor(
 	return reply, err
 }
 
-func (srv *AdminManager) newSub() (chan *Event, int) {
+func (srv *AdminManager) newSub() int {
 	ch := make(chan *Event, 2)
 	srv.mutex.Lock()
 	key := len(srv.EventSubs)
-	srv.mutex.Unlock()
-	srv.mutex.Lock()
-	srv.EventSubs = append(srv.EventSubs, ch)
+	srv.EventSubs[key] = ch
 	srv.mutex.Unlock()
 	<-ch
-	return ch, key
+	return key
 }
 
 func streamInterceptor(
@@ -212,13 +214,14 @@ func streamInterceptor(
 	handler grpc.StreamHandler,
 ) error {
 	md, _ := metadata.FromIncomingContext(ss.Context())
-	c := md.Get("consumer")
 	p, _ := peer.FromContext(ss.Context())
+
+	c := md.Get("consumer")
 	if c == nil {
 		return status.Errorf(codes.Unauthenticated, "empty consumer")
 	}
-
 	consumer := c[0]
+
 	method := info.FullMethod
 	manager := srv.(*AdminManager)
 
@@ -228,11 +231,10 @@ func streamInterceptor(
 	}
 
 	manager.Events <- &Event{Timestamp: time.Now().Unix(), Consumer: consumer, Method: method, Host: p.Addr.String()}
-	_, id := manager.newSub()
-	md.Set("subID", strconv.Itoa(id))
+	md.Set("subID", strconv.Itoa(manager.newSub()))
+
 	err := handler(srv, ss)
 	return err
-
 }
 
 func validate(acl map[string][]string, consumer string, method string) bool {
@@ -241,7 +243,7 @@ func validate(acl map[string][]string, consumer string, method string) bool {
 	for _, v := range acl[consumer] {
 		if v == method {
 			valid = true
-			continue
+			break
 		}
 		if strings.Contains(v, methodSplit[1]) {
 			if strings.HasSuffix(v, "*") || strings.HasSuffix(v, methodSplit[2]) {
