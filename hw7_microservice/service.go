@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +29,7 @@ type AdminManager struct {
 type Storage struct {
 	ACL       map[string][]string
 	Events    chan *Event
-	EventSubs map[chan *Event]struct{}
+	EventSubs []chan *Event
 	mutex     *sync.RWMutex
 }
 
@@ -43,26 +44,21 @@ func (srv *BizManager) Test(ctx context.Context, in *Nothing) (*Nothing, error) 
 }
 
 func (srv *AdminManager) Logging(in *Nothing, server Admin_LoggingServer) error {
-	ch := srv.newSub()
+	md, _ := metadata.FromIncomingContext(server.Context())
+	id, _ := strconv.Atoi(md.Get("subID")[0])
+	srv.mutex.Lock()
+	ch := srv.EventSubs[id]
+	srv.mutex.Unlock()
 	for c := range ch {
 		err := server.Send(c)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			fmt.Println("log send error: ", err.Error())
-			break
+			return err
 		}
 	}
 	return nil
-}
-
-func (srv *AdminManager) newSub() chan *Event {
-	ch := make(chan *Event, 1)
-	srv.mutex.Lock()
-	srv.EventSubs[ch] = struct{}{}
-	srv.mutex.Unlock()
-	return ch
 }
 
 func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsServer) error {
@@ -73,7 +69,11 @@ func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsSer
 		ByMethod:   make(map[string]uint64),
 		ByConsumer: make(map[string]uint64),
 	}
-	ch := srv.newSub()
+	md, _ := metadata.FromIncomingContext(server.Context())
+	id, _ := strconv.Atoi(md.Get("subID")[0])
+	srv.mutex.Lock()
+	ch := srv.EventSubs[id]
+	srv.mutex.Unlock()
 
 	for {
 		select {
@@ -83,14 +83,14 @@ func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsSer
 				return nil
 			}
 			if err != nil {
-				fmt.Println("stat send error: ", err.Error())
 				return nil
 			}
 			st.ByMethod = make(map[string]uint64)
 			st.ByConsumer = make(map[string]uint64)
 			st.Timestamp = time.Now().Unix()
-		case v := <-ch:
-			if v == nil {
+		case v, ok := <-ch:
+			if !ok {
+				ch = nil
 				return nil
 			}
 			if _, ok := st.ByMethod[v.Method]; ok {
@@ -103,7 +103,6 @@ func (srv *AdminManager) Statistics(in *StatInterval, server Admin_StatisticsSer
 			} else {
 				st.ByConsumer[v.Consumer] = 1
 			}
-
 		case <-server.Context().Done():
 			return nil
 		}
@@ -130,30 +129,28 @@ func StartMyMicroservice(ctx context.Context, listenAddr, ACLData string) error 
 
 	store := &Storage{
 		ACL:       acl,
-		Events:    make(chan *Event, 1),
+		Events:    make(chan *Event, 100),
 		mutex:     &sync.RWMutex{},
-		EventSubs: make(map[chan *Event]struct{}),
+		EventSubs: []chan *Event{},
 	}
 
 	RegisterBizServer(server, &BizManager{store})
 	RegisterAdminServer(server, &AdminManager{store})
 	fmt.Println("starting server at ", listenAddr)
 
-	// TODO: needs err handling https://www.atatus.com/blog/goroutines-error-handling/
 	go server.Serve(lis)
 
 	go func() {
 		for val := range store.Events {
 			store.mutex.RLock()
-			for c := range store.EventSubs {
+			for _, c := range store.EventSubs {
 				c <- val
 			}
 			store.mutex.RUnlock()
 		}
 		store.mutex.Lock()
-		for ch := range store.EventSubs {
+		for _, ch := range store.EventSubs {
 			close(ch)
-			delete(store.EventSubs, ch)
 		}
 		store.EventSubs = nil
 		store.mutex.Unlock()
@@ -192,8 +189,20 @@ func unaryInterceptor(
 	}
 
 	manager.Events <- &Event{Timestamp: time.Now().Unix(), Consumer: consumer, Method: method, Host: p.Addr.String()}
+	reply, err := handler(ctx, req)
+	return reply, err
+}
 
-	return handler(ctx, req)
+func (srv *AdminManager) newSub() (chan *Event, int) {
+	ch := make(chan *Event, 2)
+	srv.mutex.Lock()
+	key := len(srv.EventSubs)
+	srv.mutex.Unlock()
+	srv.mutex.Lock()
+	srv.EventSubs = append(srv.EventSubs, ch)
+	srv.mutex.Unlock()
+	<-ch
+	return ch, key
 }
 
 func streamInterceptor(
@@ -219,8 +228,11 @@ func streamInterceptor(
 	}
 
 	manager.Events <- &Event{Timestamp: time.Now().Unix(), Consumer: consumer, Method: method, Host: p.Addr.String()}
+	_, id := manager.newSub()
+	md.Set("subID", strconv.Itoa(id))
+	err := handler(srv, ss)
+	return err
 
-	return handler(srv, ss)
 }
 
 func validate(acl map[string][]string, consumer string, method string) bool {

@@ -210,7 +210,7 @@ func TestLogging(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 4; i++ {
 			evt, err := logStream1.Recv()
-			// log.Println("logger 1", evt, err)
+			//log.Println("logger 1", evt, err)
 			if err != nil {
 				t.Errorf("unexpected error: %v, awaiting event", err)
 				return
@@ -228,7 +228,7 @@ func TestLogging(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 3; i++ {
 			evt, err := logStream2.Recv()
-			// log.Println("logger 2", evt, err)
+			//log.Println("logger 2", evt, err)
 			if err != nil {
 				t.Errorf("unexpected error: %v, awaiting event", err)
 				return
