@@ -17,13 +17,13 @@ type SessionID struct {
 const sessKeyLen = 10
 
 type SessionManager struct {
-	mu sync.RWMutex
+	mu       sync.RWMutex
 	sessions map[SessionID]*Session
 }
 
 func NewSessionManager() *SessionManager {
 	return &SessionManager{
-		mu: sync.RWMutex{}
+		mu:       sync.RWMutex{},
 		sessions: map[SessionID]*Session{},
 	}
 }
