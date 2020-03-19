@@ -7,6 +7,23 @@ import (
 
 func i2s(data interface{}, out interface{}) error {
 	e := reflect.Indirect(reflect.Indirect(reflect.ValueOf(&out)).Elem())
+	if e.Kind() == reflect.Slice {
+		s := reflect.New(e.Type().Elem()).Interface()
+		f, ok := data.([]interface{})
+		if !ok {
+			return fmt.Errorf("data is not slice")
+		}
+
+		for _, v := range f {
+			err := i2s(v, s)
+			if err != nil {
+				return err
+			}
+			e.Set(reflect.Append(e, reflect.Indirect(reflect.ValueOf(s))))
+		}
+		return nil
+	}
+
 	f := data.(map[string]interface{})
 
 	for i := 0; i < e.NumField(); i++ {
