@@ -7,6 +7,9 @@ import (
 
 func i2s(data interface{}, out interface{}) error {
 	e := reflect.Indirect(reflect.Indirect(reflect.ValueOf(&out)).Elem())
+	if !e.CanSet() {
+		return fmt.Errorf("not settable")
+	}
 	if e.Kind() == reflect.Slice {
 		s := reflect.New(e.Type().Elem()).Interface()
 		f, ok := data.([]interface{})
@@ -24,7 +27,10 @@ func i2s(data interface{}, out interface{}) error {
 		return nil
 	}
 
-	f := data.(map[string]interface{})
+	f, ok := data.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("not map")
+	}
 
 	for i := 0; i < e.NumField(); i++ {
 		name := e.Type().Field(i).Name
@@ -54,6 +60,10 @@ func i2s(data interface{}, out interface{}) error {
 			}
 			e.Field(i).SetBool(val)
 		case reflect.Struct:
+			_, ok := f[name].(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("should be map")
+			}
 			err := i2s(f[name], e.Field(i).Addr().Interface())
 			if err != nil {
 				return err
