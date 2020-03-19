@@ -41,6 +41,20 @@ func i2s(data interface{}, out interface{}) error {
 			if err != nil {
 				return err
 			}
+		case reflect.Slice:
+			s := reflect.New(e.Type().Field(i).Type.Elem()).Interface()
+			a, ok := f[name].([]interface{})
+			if !ok {
+				return fmt.Errorf("need array")
+			}
+
+			for _, v := range a {
+				err := i2s(v, s)
+				if err != nil {
+					return err
+				}
+				e.Field(i).Set(reflect.Append(e.Field(i), reflect.Indirect(reflect.ValueOf(s))))
+			}
 		}
 	}
 
