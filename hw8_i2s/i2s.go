@@ -6,81 +6,84 @@ import (
 )
 
 func i2s(data interface{}, out interface{}) error {
-	e := reflect.Indirect(reflect.Indirect(reflect.ValueOf(&out)).Elem())
-	if !e.CanSet() {
-		return fmt.Errorf("not settable")
+	resStruct := reflect.Indirect(reflect.Indirect(reflect.ValueOf(&out)).Elem())
+	if !resStruct.CanSet() {
+		return fmt.Errorf("object is not settable, pass reference")
 	}
-	if e.Kind() == reflect.Slice {
-		s := reflect.New(e.Type().Elem()).Interface()
-		f, ok := data.([]interface{})
+
+	if resStruct.Kind() == reflect.Slice {
+		newStruct := reflect.New(resStruct.Type().Elem()).Interface()
+		inputData, ok := data.([]interface{})
 		if !ok {
-			return fmt.Errorf("data is not slice")
+			return fmt.Errorf("expected input data to be a slice")
 		}
 
-		for _, v := range f {
-			err := i2s(v, s)
+		for _, v := range inputData {
+			err := i2s(v, newStruct)
 			if err != nil {
 				return err
 			}
-			e.Set(reflect.Append(e, reflect.Indirect(reflect.ValueOf(s))))
+			structValue := reflect.Indirect(reflect.ValueOf(newStruct))
+			resStruct.Set(reflect.Append(resStruct, structValue))
 		}
 		return nil
 	}
 
-	f, ok := data.(map[string]interface{})
+	inputData, ok := data.(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("not map")
+		return fmt.Errorf("expected input data to be a map")
 	}
 
-	for i := 0; i < e.NumField(); i++ {
-		name := e.Type().Field(i).Name
-		switch b := e.Type().Field(i).Type.Kind(); b {
+	for i := 0; i < resStruct.NumField(); i++ {
+		fieldName := resStruct.Type().Field(i).Name
+		switch resStruct.Type().Field(i).Type.Kind() {
 		case reflect.Int:
-			val, ok := f[name].(float64)
+			val, ok := inputData[fieldName].(float64)
 			if !ok {
-				return fmt.Errorf("int err")
+				return fmt.Errorf("field %s expected to be int, but got %v", fieldName, inputData[fieldName])
 			}
-			e.Field(i).SetInt(int64(val))
+			resStruct.Field(i).SetInt(int64(val))
 		case reflect.Float64:
-			val, ok := f[name].(float64)
+			val, ok := inputData[fieldName].(float64)
 			if !ok {
-				return fmt.Errorf("float err")
+				return fmt.Errorf("field %s expected to be float, but got %v", fieldName, inputData[fieldName])
 			}
-			e.Field(i).SetFloat(val)
+			resStruct.Field(i).SetFloat(val)
 		case reflect.String:
-			val, ok := f[name].(string)
+			val, ok := inputData[fieldName].(string)
 			if !ok {
-				return fmt.Errorf("string err")
+				return fmt.Errorf("field %s expected to be string, but got %v", fieldName, inputData[fieldName])
 			}
-			e.Field(i).SetString(val)
+			resStruct.Field(i).SetString(val)
 		case reflect.Bool:
-			val, ok := f[name].(bool)
+			val, ok := inputData[fieldName].(bool)
 			if !ok {
-				return fmt.Errorf("bool err")
+				return fmt.Errorf("field %s expected to be bool, but got %v", fieldName, inputData[fieldName])
 			}
-			e.Field(i).SetBool(val)
+			resStruct.Field(i).SetBool(val)
 		case reflect.Struct:
-			_, ok := f[name].(map[string]interface{})
+			_, ok := inputData[fieldName].(map[string]interface{})
 			if !ok {
-				return fmt.Errorf("should be map")
+				return fmt.Errorf("expected input data to be a map")
 			}
-			err := i2s(f[name], e.Field(i).Addr().Interface())
+			err := i2s(inputData[fieldName], resStruct.Field(i).Addr().Interface())
 			if err != nil {
 				return err
 			}
 		case reflect.Slice:
-			s := reflect.New(e.Type().Field(i).Type.Elem()).Interface()
-			a, ok := f[name].([]interface{})
+			newStruct := reflect.New(resStruct.Type().Field(i).Type.Elem()).Interface()
+			dataSlice, ok := inputData[fieldName].([]interface{})
 			if !ok {
-				return fmt.Errorf("need array")
+				return fmt.Errorf("expected input data to be a slice")
 			}
 
-			for _, v := range a {
-				err := i2s(v, s)
+			for _, v := range dataSlice {
+				err := i2s(v, newStruct)
 				if err != nil {
 					return err
 				}
-				e.Field(i).Set(reflect.Append(e.Field(i), reflect.Indirect(reflect.ValueOf(s))))
+				structValue := reflect.Indirect(reflect.ValueOf(newStruct))
+				resStruct.Field(i).Set(reflect.Append(resStruct.Field(i), structValue))
 			}
 		}
 	}
